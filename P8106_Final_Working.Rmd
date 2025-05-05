@@ -1,0 +1,35 @@
+---
+title: "P8106 Final: Working Document"
+author:
+- "Naomi Simon-Kumar"
+- ns3782
+date: "05/05/2025"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Loading libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+
+# Load libraries
+library(tidyverse)
+library(caret)
+library(ggplot2)  
+library(tidymodels)
+library(e1071)
+library(factoextra)
+library(gridExtra)
+library(corrplot)
+library(RColorBrewer)
+library(gplots)
+library(jpeg)
+
+```
