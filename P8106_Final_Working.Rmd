@@ -4,11 +4,7 @@ author:
 - "Naomi Simon-Kumar"
 - ns3782
 date: "05/05/2025"
-output:
-  pdf_document:
-    latex_engine: xelatex
-    toc: true
-    toc_depth: 2
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -31,5 +27,41 @@ library(corrplot)
 library(RColorBrewer)
 library(gplots)
 library(jpeg)
+library(visdat)
 
 ```
+
+# Data Preprocessing
+
+```{r}
+
+# Load dataset
+flu_df <- read_csv("severe_flu.csv")
+
+# Look at variable types
+glimpse(flu_df)
+
+# Check for missing data visually 
+vis_miss(flu_df)
+
+# Convert categorical variables to factors
+flu_df <- flu_df %>%
+  mutate(
+    gender = factor(gender, levels = c(0, 1), labels = c("Female", "Male")),
+    race = factor(race, levels = c(1, 2, 3, 4), labels = c("White", "Asian", "Black", "Hispanic")),
+    smoking = factor(smoking, levels = c(0, 1, 2), labels = c("Never", "Former", "Current")),
+    diabetes = factor(diabetes, levels = c(0, 1), labels = c("No", "Yes")),
+    hypertension = factor(hypertension, levels = c(0, 1), labels = c("No", "Yes")),
+    severe_flu = factor(severe_flu, levels = c(0, 1), labels = c("No", "Yes"))
+  )
+
+# Drop ID  - not needed for analysis
+flu_df <- flu_df |> select(-id)
+
+# Check data structure
+str(flu_df)
+
+
+```
+
+The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories.
