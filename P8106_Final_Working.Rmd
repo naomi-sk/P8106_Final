@@ -19,6 +19,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(caret)
 library(ggplot2)  
+library(patchwork)
+library(corrplot)
+library(pROC)
 library(tidymodels)
 library(e1071)
 library(factoextra)
@@ -34,6 +37,9 @@ library(visdat)
 # Data Preprocessing
 
 ```{r}
+
+# Set seed for reproducibility
+set.seed(299)
 
 # Load dataset
 flu_df <- read_csv("severe_flu.csv")
@@ -61,7 +67,271 @@ flu_df <- flu_df |> select(-id)
 # Check data structure
 str(flu_df)
 
+# Set 10-fold cross-validation
+ctrl1 <- trainControl(method = "cv", number = 10)
+
+# Split data into testing and training
+data_split <- initial_split(flu_df, prop = 0.8)
+training_data <- training(data_split)
+testing_data <- testing(data_split)
+
+# Check levels of response variable
+levels(training_data$severe_flu)
 
 ```
 
-The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories.
+The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories. Data was then split into training and testing datasets.
+
+
+# Exploratory Data Analysis
+
+```{r}
+
+# Histograms for numeric predictors 
+h1 <- ggplot(training_data, aes(x = age)) +
+  geom_histogram(binwidth = 2, color = "darkblue", fill = "lightblue") +
+  ggtitle("Age Distribution") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+h2 <- ggplot(training_data, aes(x = bmi)) +
+  geom_histogram(binwidth = 1, color = "darkblue", fill = "lightblue") +
+  ggtitle("BMI") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+h3 <- ggplot(training_data, aes(x = SBP)) +
+  geom_histogram(binwidth = 5, color = "darkblue", fill = "lightblue") +
+  ggtitle("Systolic BP") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+h4 <- ggplot(training_data, aes(x = LDL)) +
+  geom_histogram(binwidth = 5, color = "darkblue", fill = "lightblue") +
+  ggtitle("LDL Cholesterol") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+h5 <- ggplot(training_data, aes(x = height)) +
+  geom_histogram(binwidth = 2, color = "darkblue", fill = "lightblue") +
+  ggtitle("Height") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+h6 <- ggplot(training_data, aes(x = weight)) +
+  geom_histogram(binwidth = 2, color = "darkblue", fill = "lightblue") +
+  ggtitle("Weight") +
+  ylab("") +
+  xlab("") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Combine plots
+# Ref code: https://tidytales.ca/snippets/2022-12-22_patchwork-shared-axis-labels/#shared-y-axis-labels
+combined_histogram_numeric <- (h1 + h2) / (h3 + h4) / (h5 + h6)
+wrap_elements(combined_histogram_numeric) +
+  labs(tag = "Count") +
+  theme(
+    plot.tag = element_text(size = rel(1), angle = 90),
+    plot.tag.position = "left"
+  )
+
+
+# Boxplots of numeric predictors
+# Ref code: https://patchwork.data-imaginist.com/reference/plot_annotation.html
+theme_no_xlab <- theme_bw() + theme(axis.title.x = element_blank())
+bp1 <- ggplot(training_data, aes(x = severe_flu, y = age)) + geom_boxplot() + theme_no_xlab
+bp2 <- ggplot(training_data, aes(x = severe_flu, y = bmi)) + geom_boxplot() + theme_no_xlab
+bp3 <- ggplot(training_data, aes(x = severe_flu, y = SBP)) + geom_boxplot() + theme_no_xlab
+bp4 <- ggplot(training_data, aes(x = severe_flu, y = LDL)) + geom_boxplot() + theme_no_xlab
+bp5 <- ggplot(training_data, aes(x = severe_flu, y = height)) + geom_boxplot() + theme_no_xlab
+bp6 <- ggplot(training_data, aes(x = severe_flu, y = weight)) + geom_boxplot() + theme_no_xlab
+
+# Combine all plots
+boxplot_numeric <- (bp1 + bp2) / (bp3 + bp4) / (bp5 + bp6) +
+  plot_annotation(title = "Distribution of Numeric Predictors by Severe Flu Status")
+
+# Ref code: https://tidytales.ca/snippets/2022-12-22_patchwork-shared-axis-labels/#shared-x-axis-labels 
+wrap_elements(boxplot_numeric) +
+  labs(tag = "Severe Flu") +
+  theme(
+    plot.tag = element_text(size = rel(1)),
+    plot.tag.position = "bottom"
+  )
+
+# Correlation plot for numeric variables
+numeric_vars <- training_data %>% select(age, height, weight, bmi, SBP, LDL)
+corrplot(cor(numeric_vars), method = "circle") 
+
+
+# Bar Plots of Categorical Predictors by Outcome
+bar1 <- ggplot(training_data, aes(x = gender, fill = severe_flu)) +
+  geom_bar(position = "fill") + labs(y = NULL)  + labs(fill = "Severe Flu") + theme_bw()
+
+bar2 <- ggplot(training_data, aes(x = race, fill = severe_flu)) +
+  geom_bar(position = "fill") + labs(y = NULL)  + theme_bw() + theme(legend.position = "none")
+
+bar3 <- ggplot(training_data, aes(x = smoking, fill = severe_flu)) +
+  geom_bar(position = "fill") + labs(y = NULL)  + theme_bw() + theme(legend.position = "none")
+
+bar4 <- ggplot(training_data, aes(x = diabetes, fill = severe_flu)) +
+  geom_bar(position = "fill") + labs(y = NULL)  + theme_bw() + theme(legend.position = "none")
+
+bar5 <- ggplot(training_data, aes(x = hypertension, fill = severe_flu)) +
+  geom_bar(position = "fill") + labs(y = NULL) + theme_bw() + theme(legend.position = "none")
+
+# Combine using patchwork
+((bar1 + bar2) / (bar3 + bar4) / (bar5 + plot_spacer())) +
+  plot_layout(guides = "collect") +
+  plot_annotation(title = "Proportion of Severe Flu by Categorical Predictor")
+
+
+```
+
+The plots show that the numeric predictors, including age, BMI, SBP, LDL, height, and weight, are approximately normally distributed, with minimal right skew for LDL. Age, SBP, LDL, and height distributions appear similar between severe flu and non-severe flu groups, with considerable middle quartile overlap. BMI and weight show slightly higher median values in the severe flu group, however, the substantial overlap in their distributions suggest these differences may not be statistically significant.
+
+Among categorical predictors, there appears to be differences in severe flu rates. Hispanic subjects show a higher proportion of severe flu cases compared to other racial groups. Diabetic patients also appear to have a slightly higher severe flu rate than non-diabetic individuals. Similarly current smokers have a slightly higher proportion of severe flu cases compared to never and former smokers. Gender and hypertension status show minimal differences in severe flu proportions across categories.
+
+
+# Simple Models
+
+## Logistic Regression
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Set up cross validation control
+ctrl <- trainControl(method = "cv", 
+                     number = 10,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+# Train logistic regression model with CV
+model.glm <- train(severe_flu ~ ., 
+                   data = training_data,
+                   method = "glm",
+                   metric = "ROC",
+                   trControl = ctrl)
+
+# Predict probabilities on test data
+glm.pred <- predict(model.glm, 
+                    newdata = testing_data, 
+                    type = "prob")[, "Yes"]
+
+# Convert probabilities to class predictions, using 0.5 cutoff
+glm.class <- rep("No", length(glm.pred))
+glm.class[glm.pred > 0.5] <- "Yes"
+
+# Confusion matrix
+confusionMatrix(
+  data = factor(glm.class, levels = c("No", "Yes")),
+  reference = testing_data$severe_flu,
+  positive = "Yes"
+)
+
+# Compute ROC 
+roc.glm <- roc(testing_data$severe_flu, glm.pred)
+
+# Plot the ROC curve and the smoothed ROC curve
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
+
+```
+
+I proceeded with using confusion matrix to evaluate how well the model classifies observations into severe and non-severe flu categories. I used a 0.5 cutoff, following the Bayes decision rule, which assigns an observation to the most likely class. In this case, the model predicts 'severe' when Pr(Y=1 | X) > 0.5, and 'not severe' otherwise.
+
+Based on the confusion matrix, the accuracy of the logistic regression model is **0.735**, or 73.5%. The misclassification rate is
+1 − Accuracy = **0.265**, meaning about 26.5% of test observations were incorrectly classified.
+
+The P-Value [Acc > NIR] is **0.2434**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class.
+
+The matrix shows 136 true negatives (non-severe flu cases correctly classified as “No”), and 11 true positives (severe flu cases correctly classified as “Yes”). There are 6 false positives (non-severe flu cases misclassified as “Yes”) and 47 false negatives (severe flu cases misclassified as “No”).
+
+Sensitivity was **0.1897**, which shows that the model correctly identified only 18.97% of severe flu cases.
+Specificity was **0.9577**, indicating that 95.77% of non-severe cases were correctly classified.
+
+The Kappa statistic was **0.1864**, indicating poor agreement between predicted and actual class labels, beyond what would be expected by chance.
+
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although it is not extremely high performing.
+
+
+## Penalized Logistic Regression
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Set preprocessing
+preproc <- c("center", "scale", "zv")
+
+
+# Define tuning grid for penalized logistic regression
+#glmnGrid <- expand.grid(.alpha = seq(0, 0.2, length = 21),
+#                        .lambda = exp(seq(-8, 0, length = 50)))
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 21),
+                        .lambda = exp(seq(-8, 0, length = 50)))
+# Fit model with CV
+model.glmn <- train(severe_flu ~ .,
+                    data = training_data,
+                    preProcess = preproc,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    metric = "ROC",
+                    trControl = ctrl)
+
+# Show best tuning parameters
+model.glmn$bestTune
+
+# Plot the results
+myCol <- rainbow(25)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+plot(model.glmn, par.settings = myPar, xTrans = function(x) log(x))
+
+
+# Coefficients in the final model
+coef(model.glmn$finalModel, model.glmn$bestTune$lambda)
+
+```
+
+I tuned elastic net logistic regression with cross-validation to predict severe flu occurrence. A preprocessing step was undertaken during model training to ensure numeric predictors were centered and scaled. Initially, I performed a grid search across alpha values from 0 to 1 and lambda values from exp(-8) to exp(0). When results showed optimal alpha=0, I refined the search with a narrower grid from 0 to 0.2 to confirm this finding. The optimal parameters (alpha = 0, lambda = 0.8493658) indicate that pure ridge regression provides the best predictive performance for this dataset. 
+Of note is that the optimal tuning parameters remained unchanged after applying standard preprocessing steps (centering, scaling, and zero variance removal), which indicates that the model's performance is robust to these transformations, and confirms glmnet's internal standardization is scaling variables appropriately.
+
+The plot displays Area Under the Curve on the y-axis, representing classification performance, against log-transformed lambda values (regularization) on the x-axis, with each line representing a different alpha mixing percentage. This confirms that ridge regression (alpha = 0) gives the largest AUC across regularization strengths, with the best performance observed at a lambda value of approximately 0.85.
+
+The final model retained all predictors, although many were shrunk towards zero. The largest coefficients were observed for BMI (0.1089), weight (0.0674), and LDL (0.0333). Several other coefficients, including raceAsian and SBP, were shrunk to be closer to zero.
+
+## LDA
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Fit LDA model using caret
+model.lda <- train(severe_flu ~ .,
+                   data = training_data,
+                   method = "lda",
+                   metric = "ROC",
+                   trControl = ctrl)
+# Predict
+lda.pred2 <- predict(model.lda, newdata = testing_data, type = "prob")
+
+```
+
+
+# Model Comparison
+
+```{r}
+
+
+```
+
+
