@@ -23,7 +23,7 @@ library(patchwork)
 library(corrplot)
 library(pROC)
 library(tidymodels)
-library(e1071)
+library(MASS)
 library(factoextra)
 library(gridExtra)
 library(corrplot)
@@ -61,8 +61,8 @@ flu_df <- flu_df %>%
     severe_flu = factor(severe_flu, levels = c(0, 1), labels = c("No", "Yes"))
   )
 
-# Drop ID  - not needed for analysis
-flu_df <- flu_df |> select(-id)
+# Drop ID
+flu_df <- dplyr::select(flu_df, -id)
 
 # Check data structure
 str(flu_df)
@@ -164,7 +164,7 @@ wrap_elements(boxplot_numeric) +
   )
 
 # Correlation plot for numeric variables
-numeric_vars <- training_data %>% select(age, height, weight, bmi, SBP, LDL)
+numeric_vars <- training_data %>% dplyr::select(age, height, weight, bmi, SBP, LDL)
 corrplot(cor(numeric_vars), method = "circle") 
 
 
@@ -207,8 +207,8 @@ Among categorical predictors, there appears to be differences in severe flu rate
 set.seed(299)
 
 # Set up cross validation control
-ctrl <- trainControl(method = "cv", 
-                     number = 10,
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 5,
                      summaryFunction = twoClassSummary,
                      classProbs = TRUE)
 
@@ -301,8 +301,7 @@ coef(model.glmn$finalModel, model.glmn$bestTune$lambda)
 
 ```
 
-I tuned elastic net logistic regression with cross-validation to predict severe flu occurrence. A preprocessing step was undertaken during model training to ensure numeric predictors were centered and scaled. Initially, I performed a grid search across alpha values from 0 to 1 and lambda values from exp(-8) to exp(0). When results showed optimal alpha=0, I refined the search with a narrower grid from 0 to 0.2 to confirm this finding. The optimal parameters (alpha = 0, lambda = 0.8493658) indicate that pure ridge regression provides the best predictive performance for this dataset. 
-Of note is that the optimal tuning parameters remained unchanged after applying standard preprocessing steps (centering, scaling, and zero variance removal), which indicates that the model's performance is robust to these transformations, and confirms glmnet's internal standardization is scaling variables appropriately.
+I tuned elastic net logistic regression with cross-validation to predict severe flu occurrence. A preprocessing step was undertaken during model training to ensure numeric predictors were centered and scaled. Initially, I performed a grid search across alpha values from 0 to 1 and lambda values from exp(-8) to exp(0). When results showed optimal alpha=0, I refined the search with a narrower grid from 0 to 0.2 to confirm this finding. The optimal parameters (**alpha = 0, lambda = 0.8493658**) indicate that pure ridge regression provides the best predictive performance for this dataset. 
 
 The plot displays Area Under the Curve on the y-axis, representing classification performance, against log-transformed lambda values (regularization) on the x-axis, with each line representing a different alpha mixing percentage. This confirms that ridge regression (alpha = 0) gives the largest AUC across regularization strengths, with the best performance observed at a lambda value of approximately 0.85.
 
@@ -315,22 +314,90 @@ The final model retained all predictors, although many were shrunk towards zero.
 # Set seed for reproducibility
 set.seed(299)
 
+
+# Fit the LDA model using MASS package
+lda.fit <- lda(severe_flu ~ ., data = training_data)
+
+# Plot the histogram of discriminant scores (Z-variable, Z = a^T*X)
+plot(lda.fit)
+
 # Fit LDA model using caret
 model.lda <- train(severe_flu ~ .,
                    data = training_data,
                    method = "lda",
                    metric = "ROC",
                    trControl = ctrl)
-# Predict
-lda.pred2 <- predict(model.lda, newdata = testing_data, type = "prob")
+
+# Predict probabilities for test data
+lda.pred <- predict(model.lda, newdata = testing_data, type = "prob")
+
+# Classify using 0.5 cutoff
+lda.class <- rep("No", length(lda.pred[, "Yes"]))
+lda.class[lda.pred[, "Yes"] > 0.5] <- "Yes"
+
+# Generate confusion matrix
+confusionMatrix(
+  data = factor(lda.class, levels = c("No", "Yes")),
+  reference = testing_data$severe_flu,
+  positive = "Yes"
+)
+
+# ROC
+roc.lda <- roc(testing_data$severe_flu, lda.pred[, "Yes"])
+plot(roc.lda, legacy.axes = TRUE, print.auc = TRUE)
 
 ```
 
+I fit the LDA model using the MASS package initially, examining the distribution of the LDA discriminant scores (Z = aᵗX) for each class. From the histogram, we can see there is some separation between the linear discriminant scores for the “No” and “Yes” severe flu groups. This suggests that the model is able to distinguish between the two classes using a linear combination of the predictors. I then proceeded to fit the model using caret.
+
+Based on the confusion matrix from test data predictions, the accuracy of the LDA model is **0.74**, or 74.0%. The misclassification rate is 1 − Accuracy = **0.26**, meaning about 26% of test observations were incorrectly classified.
+
+The **P-Value [Acc > NIR] is 0.1965**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not significantly outperform a naive classifier that always predicts the majority class.
+
+The matrix shows 136 true negatives (non-severe flu cases correctly classified as “No”) and 12 true positives (severe flu cases correctly classified as “Yes”). There are 6 false positives (non-severe flu cases misclassified as “Yes”) and 46 false negatives (severe flu cases misclassified as “No”).
+
+Sensitivity was **0.2069**, indicating that the model correctly identified only 20.69% of severe flu cases.
+Specificity was **0.9577**, meaning 95.77% of non-severe cases were correctly classified.
+
+The Kappa statistic was **0.2068**, indicating weak agreement between the predicted and actual class labels, although slightly better than what would be expected by chance.
+
+
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.709**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although its performance is limited.
+
+# Moderately Complex models
+
+## MARS 
+
+```{r}
+
+
+```
+
+
+## GAM
+
+```{r}
+
+
+```
+
+
+# Complex Models
+
+
+```{r}
+
+```
 
 # Model Comparison
 
 ```{r}
 
+# Use cross validation to perform model selection
+res <- resamples(list(Logistic_Regression = model.glm,
+                      Penalised_Logistic_Regression = model.glmn,
+                      LDA = model.lda))
+summary(res)
 
 ```
 
