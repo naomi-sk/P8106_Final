@@ -22,7 +22,6 @@ library(ggplot2)
 library(patchwork)
 library(corrplot)
 library(pROC)
-library(tidymodels)
 library(MASS)
 library(factoextra)
 library(gridExtra)
@@ -31,6 +30,7 @@ library(RColorBrewer)
 library(gplots)
 library(jpeg)
 library(visdat)
+library(vip)
 
 ```
 
@@ -370,20 +370,115 @@ The ROC curve indicates the model has moderate classification performance, with 
 
 ```{r}
 
+# Set seed for reproducibility
+set.seed(299)
+
+# Tuning grid for degree and number of terms (nprune)
+mars_grid <- expand.grid(
+  degree = 1:4, # degree of interactions
+  nprune = 2:20 # no. of retained terms
+)
+
+# Fit the MARS model
+model.mars <- train(severe_flu ~ .,
+                    data = training_data,
+                    method = "earth",
+                    tuneGrid = mars_grid,
+                    metric = "ROC",
+                    trControl = ctrl)
+
+# Plot CV results
+ggplot(model.mars)
+
+# Best parameters
+model.mars$bestTune
+
 
 ```
 
+I opted to set `degree` to 1:4, allowing me to represent an appropriate level of interactions without too much complexity. 
+For the number of retained terms (`nprune`), I expanded the range to 2:20, which allowed the model to show a stable performance plateau. The MARS model achieved the highest ROC using degree = 1 (i.e., no interactions) and approximately 3 retained terms.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Coefficients for final model
+coef(model.mars$finalModel)
+
+# Partial dependence plot for 'bmi'
+pdp::partial(model.mars, pred.var = c("bmi"), grid.resolution = 200) |> autoplot()
+
+# Partial dependence plot for 'LDL'
+pdp::partial(model.mars, pred.var = c("LDL"), grid.resolution = 200) |> autoplot()
+
+```
+
+The final model can be represented as follows:
+
+$$
+\begin{aligned} 
+\log(\text{odds of severe flu})= -2.26535278 + 0.35193909 × h(bmi-26.6) + 0.01153187 × h(LDL-77)
+\end{aligned}
+$$
+where $h(x) = \max(0,x)$ is the hinge function.
+
+The partial dependence plot shows that higher BMI values (greater than 26.6) are associated with lower predicted probability of severe flu. While the coefficient for h(bmi-26.6) is positive in the log-odds scale, there appears to be  different pattern observed in the plot, likely due to an averaging effect across all observations in the data and the non-linear transformation between log-odds and probability scales (Molnar, 2022; Goldstein et al., 2015).
+For LDL, the partial dependence plot shows that after approximately 77 higher LDL values are associated with a decreasing predicted probability of severe flu. Similar to the BMI partial dependence plot, this observation appears to contradict the positive coefficient for h(LDL-77) in the final MARS model equation. Overall, this suggests the effects of predictors across the subject population in the data may merit careful consideration.
+
+```{r}
+
+# Variable importance plot for MARS
+vip(model.mars$finalModel, type = "nsubsets")
+
+```
+
+The variable importance plot shows that BMI and LDL are the most influential predictors of severe flu in the final MARS model, with BMI being the most important predictor identified. The other predictors were not identified as being influential for the model.
 
 ## GAM
 
 ```{r}
 
+# Set seed for reproducibility
+set.seed(299)
+
+# Fit GAM model using caret
+model.gam <- train(
+  severe_flu ~ .,
+  data = training_data,
+  method = "gam",
+  metric = "ROC",
+  trControl = ctrl
+)
+
+# Summary
+summary(model.gam)
+
+# Examine final model parameters
+model.gam$finalModel
+
+# Plot smooth GAM terms
+# Code source: https://bookdown.org/ndphillips/YaRrr/arranging-plots-with-parmfrow-and-layout.html
+par(mfrow = c(3, 2))  
+plot(model.gam$finalModel)
+par(mfrow = c(1, 1)) # Reset plotting window
+
+```
+
+Among the continuous predictors, BMI and height are modelled as approximately linear with estimated degrees of freedom (edf) approximately 1 and statistically significant smooth terms (p < 0.05). Based on the predictor plots, these variables show linear relationships with severe flu, consistent with their estimated degrees of freedom. The smooth terms for LDL and weight are statistically significant (p < 0.05), with estimated degrees of freedom of 2.15 and 1.96 respectively, indicating nonlinear relationships with severe flu. The LDL plot appears to show flatness, indicating a slight nonlinear effect. In contrast, a clear  downward trend for weight is observable, showing slight nonlinearity represented by the smooth term.
+Predictors age and SBP are not statistically significant, although they are modeled as approximately linear (edf = 1). 
+
+# Complex Models
+
+## SVM
+
+```{r}
 
 ```
 
 
-# Complex Models
-
+## Boosting
 
 ```{r}
 
@@ -396,9 +491,16 @@ The ROC curve indicates the model has moderate classification performance, with 
 # Use cross validation to perform model selection
 res <- resamples(list(Logistic_Regression = model.glm,
                       Penalised_Logistic_Regression = model.glmn,
-                      LDA = model.lda))
+                      LDA = model.lda,
+                      MARS = model.mars,
+                      GAM = model.gam))
 summary(res)
 
 ```
 
+# References
+
+Molnar, C. (2022). Interpretable machine learning: A guide for making black box models explainable (2nd ed.). https://christophm.github.io/interpretable-ml-book
+
+Goldstein, A., Kapelner, A., Bleich, J., & Pitkin, E. (2015). Peeking inside the black box: Visualizing statistical learning with plots of individual conditional expectation. journal of Computational and Graphical Statistics, 24(1), 44-65.
 
