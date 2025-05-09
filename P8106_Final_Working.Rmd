@@ -473,7 +473,92 @@ Predictors age and SBP are not statistically significant, although they are mode
 
 ## SVM
 
+## Linear SVM
+
 ```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Fit model using SVM (linear)
+svml.fit <- train(severe_flu ~ . ,
+                  data = training_data,
+                  method = "svmLinear",
+                  tuneGrid = data.frame(C = exp(seq(-5, 2, len = 50))),
+                  trControl = ctrl)
+
+# Plot
+plot(svml.fit, highlight = TRUE, xTrans = log)
+
+# Find optimal
+svml.fit$bestTune # optimal C = 0.05743262
+
+exp(-5) # 0.006737947
+exp(2) # 7.389056
+
+```
+
+The optimal cost tuning parameter is 0.057, selected from the grid exp(seq(-5, 2)). Since this value is not at the boundary, no further grid expansion is needed. 
+Based on the cross-validation plot, the best performance was achieved at a cost value of approximately 0.057, with a maximum AUC of about 0.689. Note that the x-axis representing the cost parameter is log-scaled.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict based on test data
+svm.linear.pred <- predict(svml.fit, newdata = testing_data, type = "prob")[, "Yes"]
+svm.linear.class <- ifelse(svm.linear.pred > 0.5, "Yes", "No")
+
+# Confusion Matrix
+confusionMatrix(factor(svm.linear.class, levels = c("No", "Yes")),
+                testing_data$severe_flu,
+                positive = "Yes")
+
+# Plot AUC
+roc.svm.linear <- roc(testing_data$severe_flu, svm.linear.pred)
+plot(roc.svm.linear, legacy.axes = TRUE, print.auc = TRUE)
+
+```
+
+Based on the confusion matrix from test data predictions, the accuracy of the linear SVM model is **0.72**, or 72%. The misclassification rate is 1 − Accuracy = **0.28**, meaning 28% of test observations were incorrectly classified.
+
+The **P-Value [Acc > NIR] is 0.4117**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
+
+The confusion matrix shows 140 true negatives (non-severe flu cases correctly classified as “No”) and 4 true positives (severe flu cases correctly classified as “Yes”). There were 54 false negatives (severe flu cases misclassified as “No”) and 2 false positives (non-severe cases misclassified as “Yes”).
+
+Sensitivity was **0.06897**, meaning 6.9% of severe flu cases were correctly identified. Specificity was comparably high at **0.98592**, indicating the model correctly identified 98.6% of non-severe cases.
+
+The Kappa statistic was **0.0747**, showing very weak agreement between predicted and actual class labels, only slightly better than chance.
+
+The ROC curve shows an **AUC of 0.699**, suggesting modest overall classification performance. While the model achieves a reasonable tradeoff between sensitivity and specificity across thresholds, it has very low sensitivity which suggests it may not be practically useful for classification.
+
+
+## Radial Kernel SVM
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Define tuning grid for Radial Kernel
+svmr.grid <- expand.grid(C = exp(seq(1, 7, len = 50)),
+                         sigma = exp(seq(-10, -2, len = 20)))
+
+# Fit radial kernel model
+svmr.fit <- train(severe_flu ~ . , 
+                  data = training_data,
+                  method = "svmRadialSigma",
+                  tuneGrid = svmr.grid,
+                  trControl = ctrl)
+
+# Define colour scheme
+myCol <- rainbow(25)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+
+# Plot
+plot(svmr.fit, highlight = TRUE, par.settings = myPar)
 
 ```
 
@@ -488,12 +573,17 @@ Predictors age and SBP are not statistically significant, although they are mode
 
 ```{r}
 
+# Set seed for reproducibility
+set.seed(299)
+
 # Use cross validation to perform model selection
 res <- resamples(list(Logistic_Regression = model.glm,
                       Penalised_Logistic_Regression = model.glmn,
                       LDA = model.lda,
                       MARS = model.mars,
-                      GAM = model.gam))
+                      GAM = model.gam,
+                      SVM_Linear = svml.fit,
+                      SVM_Radial_Kernel = svmr.fit))
 summary(res)
 
 ```
