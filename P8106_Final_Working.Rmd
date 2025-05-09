@@ -542,8 +542,8 @@ The ROC curve shows an **AUC of 0.699**, suggesting modest overall classificatio
 set.seed(299)
 
 # Define tuning grid for Radial Kernel
-svmr.grid <- expand.grid(C = exp(seq(1, 7, len = 50)),
-                         sigma = exp(seq(-10, -2, len = 20)))
+svmr.grid <- expand.grid(C = exp(seq(1, 5, len = 10)),
+                         sigma = exp(seq(-10, -4, len = 6)))
 
 # Fit radial kernel model
 svmr.fit <- train(severe_flu ~ . , 
@@ -551,6 +551,12 @@ svmr.fit <- train(severe_flu ~ . ,
                   method = "svmRadialSigma",
                   tuneGrid = svmr.grid,
                   trControl = ctrl)
+
+# Best sigma and cost
+svmr.fit$bestTune
+
+exp(-10) # 0.0003354626
+exp(-4) # 0.01831564
 
 # Define colour scheme
 myCol <- rainbow(25)
