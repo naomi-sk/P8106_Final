@@ -602,6 +602,18 @@ ggplot(gbmA.fit, highlight = TRUE)
 ```
 I then proceeded to perform boosting using adaboost. I tuned the grid keeping interaction.depth at 3, which was appropriate as it gave me n.trees and shrinkage values not at the boundary of their respective grids. Based on this model, the optimal tuning parameters were **n.trees = 500, interaction.depth = 1, shrinkage = 0.003, and n.minobsinnode = 10**, based on cross validation AUC. Based on the plot, the AUC appears to peak at approximately 0.69 for these parameters.
 
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Presenting variable importance
+summary(gbmA.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
+
+```
+
+From this, we can see the most important predictor appears to be **BMI**, followed by **LDL** and **height**, respectively. The least important variables based on this model appear to be **HypertensionYes**, as well as **smokingFormer** and **raceBlack**.
+
 # Model Comparison
 
 ```{r}
