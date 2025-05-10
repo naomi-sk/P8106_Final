@@ -21,6 +21,7 @@ library(caret)
 library(ggplot2)  
 library(patchwork)
 library(corrplot)
+library(table1)
 library(pROC)
 library(MASS)
 library(factoextra)
@@ -81,10 +82,39 @@ levels(training_data$severe_flu)
 
 ```
 
-The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories. Data was then split into training and testing datasets.
+The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories. Data was then split into training and testing datasets. The ID variable was removed.
 
 
 # Exploratory Data Analysis
+
+## Descriptive summary of Data
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Reference code: https://cran.r-project.org/web/packages/table1/vignettes/table1-examples.html 
+
+label(flu_df$age) <- "Age (yrs)"
+label(flu_df$gender) <- "Gender"
+label(flu_df$race) <- "Race/Ethnicity"
+label(flu_df$smoking) <- "Smoking Status"
+label(flu_df$height) <- "Height (cm)"
+label(flu_df$weight) <- "Weight (kg)"
+label(flu_df$bmi) <- "Body Mass Index (weight/ (height)^2)"
+label(flu_df$diabetes) <- "Diabetes"
+label(flu_df$hypertension) <- "Hypertension"
+label(flu_df$SBP) <- "Systolic Blood Pressure (mmHg)"
+label(flu_df$LDL) <- "LDL cholesterol (mg/dL)"
+
+table1= table1(~ gender + race + smoking + height + weight + bmi + diabetes + hypertension + SBP + LDL, data=flu_df)
+knitr::kable(table1)
+
+```
+
+
+## Summary of Predictors
 
 ```{r}
 
