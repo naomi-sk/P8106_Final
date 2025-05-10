@@ -341,6 +341,25 @@ The plot displays Area Under the Curve on the y-axis, representing classificatio
 
 The final model retained all predictors, although many were shrunk towards zero. The largest coefficients were observed for BMI (0.1089), weight (0.0674), and LDL (0.0333). Several other coefficients, including raceAsian and SBP, were shrunk to be closer to zero.
 
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict on test data
+glmn.pred <- predict(model.glmn, newdata = testing_data, type = "prob")[,2]
+
+# Compute ROC
+roc.glmn <- roc(testing_data$severe_flu, glmn.pred)
+
+# Plot the ROC curve and the smoothed ROC curve
+plot(roc.glmn, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glmn), col = 4, add = TRUE)
+
+```
+
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.707**. This indicates the model is able to classify severe and non-severe cases across classification thresholds.
+
 ## LDA
 
 ```{r}
@@ -470,6 +489,25 @@ vip(model.mars$finalModel, type = "nsubsets")
 
 The variable importance plot shows that BMI and LDL are the most influential predictors of severe flu in the final MARS model, with BMI being the most important predictor identified. The other predictors were not identified as being influential for the model.
 
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict model on test data
+mars.pred <- predict(model.mars, newdata = testing_data, type = "prob")[,2]
+
+# Compute ROC
+roc.mars <- roc(testing_data$severe_flu, mars.pred)
+
+# Plot the ROC curve and the smoothed ROC curve
+plot(roc.mars, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.mars), col = 4, add = TRUE)
+
+```
+
+Based on the ROC curve, the GAM model achieved an AUC of 0.668, representing modest classification performance on the test set. It is able to classify severe and non-severe flu cases better than chance, but it is not high performing.
+
 ## GAM
 
 ```{r}
@@ -502,6 +540,26 @@ par(mfrow = c(1, 1)) # Reset plotting window
 
 Among the continuous predictors, BMI and height are modelled as approximately linear with estimated degrees of freedom (edf) approximately 1 and statistically significant smooth terms (p < 0.05). Based on the predictor plots, these variables show linear relationships with severe flu, consistent with their estimated degrees of freedom. The smooth terms for LDL and weight are statistically significant (p < 0.05), with estimated degrees of freedom of 2.15 and 1.96 respectively, indicating nonlinear relationships with severe flu. The LDL plot appears to show flatness, indicating a slight nonlinear effect. In contrast, a clear  downward trend for weight is observable, showing slight nonlinearity represented by the smooth term.
 Predictors age and SBP are not statistically significant, although they are modeled as approximately linear (edf = 1). 
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict model on test data
+gam.pred <- predict(model.gam, newdata = testing_data, type = "prob")[,2]
+
+# Compute ROC
+roc.gam <- roc(testing_data$severe_flu, gam.pred)
+
+# Plot the ROC curve and the smoothed ROC curve
+plot(roc.gam, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.gam), col = 4, add = TRUE)
+
+
+```
+
+Based on the ROC curve, the GAM model achieved an AUC of 0.690, representing modest classification performance on the test set. It is able to classify severe and non-severe flu cases better than chance, but not with high reliability.
 
 # Complex Models
 
@@ -625,7 +683,7 @@ plot(roc.svm.radial, legacy.axes = TRUE, print.auc = TRUE)
 
 ```
 
-Based on the confusion matrix from test data predictions, the accuracy of the linear SVM model is **0.745**, or 74.5%. The misclassification rate is 1 − Accuracy = **0.255**, meaning 25.5% of test observations were incorrectly classified.
+Based on the confusion matrix from test data predictions, the accuracy of the radial kernel SVM model is **0.745**, or 74.5%. The misclassification rate is 1 − Accuracy = **0.255**, meaning 25.5% of test observations were incorrectly classified.
 
 The **P-Value [Acc > NIR] is 0.1554**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
 
