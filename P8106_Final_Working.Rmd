@@ -195,6 +195,9 @@ bar5 <- ggplot(training_data, aes(x = hypertension, fill = severe_flu)) +
 
 The plots show that the numeric predictors, including age, BMI, SBP, LDL, height, and weight, are approximately normally distributed, with minimal right skew for LDL. Age, SBP, LDL, and height distributions appear similar between severe flu and non-severe flu groups, with considerable middle quartile overlap. BMI and weight show slightly higher median values in the severe flu group, however, the substantial overlap in their distributions suggest these differences may not be statistically significant.
 
+The correlation plot shows several relationships among continuous predictors. Weight and BMI have a strong positive correlation (r ≈ 0.8), which may indicate colinearity. This is expected as BMI is calculated directly from weight and height. Therefore, interpretation of model results, including identifying important predictors of severe flu, should consider that these variables overlap  in what they measure.
+Age and SBP have a moderate positive correlation (r ≈ 0.4). Height and weight are weakly positively correlated (r ≈ 0.2). By comparison, height has a moderate negative correlation with BMI (r ≈ -0.4). 
+
 Among categorical predictors, there appears to be differences in severe flu rates. Hispanic subjects show a higher proportion of severe flu cases compared to other racial groups. Diabetic patients also appear to have a slightly higher severe flu rate than non-diabetic individuals. Similarly current smokers have a slightly higher proportion of severe flu cases compared to never and former smokers. Gender and hypertension status show minimal differences in severe flu proportions across categories.
 
 
@@ -570,6 +573,41 @@ I then proceeded to fit a support vector machine with radial kernel model, explo
 
 The plot of cross-validated AUC shows the best performance was around 0.70 corresponding to the optimal tuning parameters identified for the radial support vector machine.
 
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict probabilities on test data using radial SVM
+svm.radial.pred <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
+
+# Convert to class predictions using 0.5 cutoff
+svm.radial.class <- ifelse(svm.radial.pred > 0.5, "Yes", "No")
+
+# Confusion Matrix
+confusionMatrix(factor(svm.radial.class, levels = c("No", "Yes")),
+                testing_data$severe_flu,
+                positive = "Yes")
+
+# ROC and AUC
+roc.svm.radial <- roc(testing_data$severe_flu, svm.radial.pred)
+plot(roc.svm.radial, legacy.axes = TRUE, print.auc = TRUE)
+
+```
+
+Based on the confusion matrix from test data predictions, the accuracy of the linear SVM model is **0.745**, or 74.5%. The misclassification rate is 1 − Accuracy = **0.255**, meaning 25.5% of test observations were incorrectly classified.
+
+The **P-Value [Acc > NIR] is 0.1554**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
+
+The confusion matrix shows 139 true negatives (non-severe flu cases correctly classified as “No”) and 10 true positives (severe flu cases correctly classified as “Yes”). There were 48 false negatives (severe flu cases misclassified as “No”) and 3 false positives (non-severe cases misclassified as “Yes”).
+
+Sensitivity was **0.1724**, meaning 17.24% of severe flu cases were correctly identified. Specificity was higher at **0.9789**, indicating the model correctly identified 97.89% of non-severe cases.
+
+The Kappa statistic was **0.1963**, representing weak agreement between predicted and actual class labels, only slightly better than chance.
+
+The ROC curve shows an **AUC of 0.699**, indicating modest overall classification performance. The model achieves a reasonable tradeoff between sensitivity and specificity across thresholds, although its sensitivity is relatively low, limiting its practical use.
+
+
 ## Boosting
 
 ```{r}
@@ -600,6 +638,7 @@ gbmA.fit$bestTune
 ggplot(gbmA.fit, highlight = TRUE)
 
 ```
+
 I then proceeded to perform boosting using adaboost. I tuned the grid keeping interaction.depth at 3, which was appropriate as it gave me n.trees and shrinkage values not at the boundary of their respective grids. Based on this model, the optimal tuning parameters were **n.trees = 500, interaction.depth = 1, shrinkage = 0.003, and n.minobsinnode = 10**, based on cross validation AUC. Based on the plot, the AUC appears to peak at approximately 0.69 for these parameters.
 
 ```{r}
@@ -613,6 +652,30 @@ summary(gbmA.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
 ```
 
 From this, we can see the most important predictor appears to be **BMI**, followed by **LDL** and **height**, respectively. The least important variables based on this model appear to be **HypertensionYes**, as well as **smokingFormer** and **raceBlack**.
+
+Next, finding test error:
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict probabilities for positive class (ie Yes)
+gbmA.prob <- predict(gbmA.fit, newdata = testing_data, type = "prob")[, "Yes"]
+
+# Compute and plot ROC
+roc.gbmA <- roc(testing_data$severe_flu, gbmA.prob)
+plot(roc.gbmA, col = 2)
+
+# Test AUC
+auc_gbmA <- roc.gbmA$auc[1]
+modelNames <- "Adaboost"
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc_gbmA,3)),
+col = 1:2, lwd = 2)
+
+```
+
+To find the test performance for this model, I computed the AUC (area under the ROC curve). Based on the plot, **AUC was 0.674**, which represents moderate classification performance for predicting severe flu on the test set. This would indicate that the adaboost model has limited reliability in classifying severe flu cases.
 
 # Model Comparison
 
