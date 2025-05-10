@@ -314,6 +314,14 @@ summary(res)
 
 bwplot(res, metric="ROC")
 
+```
+**Figure. Boxplot of cross-validated AUC (ROC) values for all candidate models. SVM with a radial kernel achieved the highest average AUC and showed consistent performance across resamples, while other models such as penalized logistic regression and logistic regression also performed comparably well.**
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
 # Extract mean AUC values 
 roc_df <- as_tibble(summary(res)$statistics$ROC, rownames = "Model")
 
@@ -325,7 +333,6 @@ roc_clean <- roc_df %>%
 kable(roc_clean)
 
 ```
-
 **Table 2. Mean cross-validated AUC (ROC) values for all candidate models. SVM with a radial kernel achieved the highest average AUC (0.701).**
 
 The cross-validation results show that the SVM with a radial kernel achieved the highest mean AUC (0.701), with penalized logistic regression (0.696) and standard logistic regression (0.695) performing similarly.
