@@ -785,6 +785,66 @@ summary(res)
 
 ```
 
+The cross validation summary show that SVM with radial kernel achieved the highest mean AUC (0.701), followed closely by penalized logistic regression (0.696) and logistic regression (0.695).
+
+Looking at test errors for the models:
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Generate test set predictions for all models
+glm.pred   <- predict(model.glm, newdata = testing_data, type = "prob")[, "Yes"]
+glmn.pred  <- predict(model.glmn, newdata = testing_data, type = "prob")[, "Yes"]
+lda.pred   <- predict(model.lda, newdata = testing_data, type = "prob")[, "Yes"]
+mars.pred  <- predict(model.mars, newdata = testing_data, type = "prob")[, "Yes"]
+gam.pred   <- predict(model.gam, newdata = testing_data, type = "prob")[, "Yes"]
+svml.pred  <- predict(svml.fit, newdata = testing_data, type = "prob")[, "Yes"]
+svmr.pred  <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
+gbmA.pred  <- predict(gbmA.fit, newdata = testing_data, type = "prob")[, "Yes"]
+
+# Compute ROC for each
+roc.glm <- roc(testing_data$severe_flu, glm.pred)
+roc.glmn <- roc(testing_data$severe_flu, glmn.pred)
+roc.lda <- roc(testing_data$severe_flu, lda.pred)
+roc.mars <- roc(testing_data$severe_flu, mars.pred)
+roc.gam <- roc(testing_data$severe_flu, gam.pred)
+roc.svml <- roc(testing_data$severe_flu, svml.pred)
+roc.svmr <- roc(testing_data$severe_flu, svmr.pred)
+roc.gbmA <- roc(testing_data$severe_flu, gbmA.pred)
+
+# List of AUCs
+auc <- c(
+  roc.glm$auc[1],
+  roc.glmn$auc[1],
+  roc.lda$auc[1],
+  roc.mars$auc[1],
+  roc.gam$auc[1],
+  roc.svml$auc[1],
+  roc.svmr$auc[1],
+  roc.gbmA$auc[1]
+)
+
+modelNames <- c(
+  "Logistic", "Penalized Logistic", "LDA", "MARS",
+  "GAM", "SVM Linear", "SVM Radial", "AdaBoost"
+)
+
+# Plot ROC curves
+ggroc(list(
+  roc.glm, roc.glmn, roc.lda, roc.mars,
+  roc.gam, roc.svml, roc.svmr, roc.gbmA
+), legacy.axes = TRUE) +
+  scale_color_discrete(
+    labels = paste0(modelNames, " (", round(auc, 3), ")"),
+    name = "Models (AUC)"
+  ) +
+  geom_abline(intercept = 0, slope = 1, color = "grey") +
+  ggtitle("ROC Curves for All Models (Test Data Performance)") 
+
+```
+
 # References
 
 Molnar, C. (2022). Interpretable machine learning: A guide for making black box models explainable (2nd ed.). https://christophm.github.io/interpretable-ml-book
