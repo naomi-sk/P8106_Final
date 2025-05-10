@@ -31,6 +31,7 @@ library(gplots)
 library(jpeg)
 library(visdat)
 library(vip)
+library(tidymodels)
 
 ```
 
@@ -542,7 +543,7 @@ The ROC curve shows an **AUC of 0.699**, suggesting modest overall classificatio
 set.seed(299)
 
 # Define tuning grid for Radial Kernel
-svmr.grid <- expand.grid(C = exp(seq(1, 5, len = 10)),
+svmr.grid <- expand.grid(C = exp(seq(-1, 5, len = 10)),
                          sigma = exp(seq(-10, -4, len = 6)))
 
 # Fit radial kernel model
@@ -555,9 +556,6 @@ svmr.fit <- train(severe_flu ~ . ,
 # Best sigma and cost
 svmr.fit$bestTune
 
-exp(-10) # 0.0003354626
-exp(-4) # 0.01831564
-
 # Define colour scheme
 myCol <- rainbow(25)
 myPar <- list(superpose.symbol = list(col = myCol),
@@ -568,12 +566,41 @@ plot(svmr.fit, highlight = TRUE, par.settings = myPar)
 
 ```
 
+I then proceeded to fit a support vector machine with radial kernel model, exploring different grids for the tuning parameters cost and sigma to ensure the optimal tuning parameters were appropriately within their respective grid ranges and not at the boundary of the grid. The best **cost** tuning parameter for this model is **2.718282**, and the best **sigma** tuning parameter is **0.0005004514**. 
+
+The plot of cross-validated AUC shows the best performance was around 0.70 corresponding to the optimal tuning parameters identified for the radial support vector machine.
 
 ## Boosting
 
 ```{r}
 
+# Set seed for reproducibility
+set.seed(299)
+
+# Define tuning grid for parameters
+gbmA.grid <- expand.grid(n.trees = c(100, 500, 1000, 5000), # no. of trees reduced for computational efficiency
+                         interaction.depth = 1:3, # want to learn slowly, so keep small
+                         shrinkage = c(0.001, 0.003, 0.005), # range of lambda values
+                         n.minobsinnode = 10)
+
+
+gbmA.fit <- train(severe_flu ~ . ,
+                  training_data,
+                  tuneGrid = gbmA.grid,
+                  trControl = ctrl,
+                  method = "gbm",
+                  distribution = "adaboost",
+                  metric = "ROC",
+                  verbose = FALSE)
+
+# Identify best tuning parameters
+gbmA.fit$bestTune
+
+# Plot to show best tuning parameters
+ggplot(gbmA.fit, highlight = TRUE)
+
 ```
+I then proceeded to perform boosting using adaboost. I tuned the grid keeping interaction.depth at 3, which was appropriate as it gave me n.trees and shrinkage values not at the boundary of their respective grids. Based on this model, the optimal tuning parameters were **n.trees = 500, interaction.depth = 1, shrinkage = 0.003, and n.minobsinnode = 10**, based on cross validation AUC. Based on the plot, the AUC appears to peak at approximately 0.69 for these parameters.
 
 # Model Comparison
 
@@ -589,7 +616,8 @@ res <- resamples(list(Logistic_Regression = model.glm,
                       MARS = model.mars,
                       GAM = model.gam,
                       SVM_Linear = svml.fit,
-                      SVM_Radial_Kernel = svmr.fit))
+                      SVM_Radial_Kernel = svmr.fit,
+                      AdaBoost = gbmA.fit))
 summary(res)
 
 ```
