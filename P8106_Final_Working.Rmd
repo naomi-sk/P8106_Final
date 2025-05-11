@@ -33,6 +33,7 @@ library(jpeg)
 library(visdat)
 library(vip)
 library(tidymodels)
+library(knitr)
 
 ```
 
@@ -112,7 +113,6 @@ table1= table1(~ gender + race + smoking + height + weight + bmi + diabetes + hy
 knitr::kable(table1)
 
 ```
-
 
 ## Summary of Predictors
 
@@ -356,9 +356,35 @@ roc.glmn <- roc(testing_data$severe_flu, glmn.pred)
 plot(roc.glmn, legacy.axes = TRUE, print.auc = TRUE)
 plot(smooth(roc.glmn), col = 4, add = TRUE)
 
+
 ```
 
 The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.707**. This indicates the model is able to classify severe and non-severe cases across classification thresholds.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Classify using 0.5 cutoff
+glmn.class <- rep("No", length(glmn.pred))
+glmn.class[glmn.pred > 0.5] <- "Yes"
+
+# Generate confusion matrix
+confusionMatrix(
+  data = factor(glmn.class, levels = c("No", "Yes")),
+  reference = testing_data$severe_flu,
+  positive = "Yes"
+)
+
+# ROC
+roc.glmn.fit <- roc(testing_data$severe_flu, glmn.pred)
+plot(roc.glmn.fit, legacy.axes = TRUE, print.auc = TRUE)
+
+
+```
+
+These results show that at the default 0.5 classification threshold, the model failed to predict any positive cases, which corresponds with 0 sensitivity. This underscores a potential limitation of using a fixed threshold when there is an imbalance in classes, even though the model’s AUC (0.707) indicates moderate overall performance in classifying severe and non-severe flu cases.
 
 ## LDA
 
@@ -695,6 +721,14 @@ The Kappa statistic was **0.1963**, representing weak agreement between predicte
 
 The ROC curve shows an **AUC of 0.699**, indicating modest overall classification performance. The model achieves a reasonable tradeoff between sensitivity and specificity across thresholds, although its sensitivity is relatively low, limiting its practical use.
 
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+```
+
+
 
 ## Boosting
 
@@ -782,6 +816,16 @@ res <- resamples(list(Logistic_Regression = model.glm,
                       SVM_Radial_Kernel = svmr.fit,
                       AdaBoost = gbmA.fit))
 summary(res)
+
+# Extract mean AUC values 
+roc_df <- as_tibble(summary(res)$statistics$ROC, rownames = "Model")
+
+# Select only Model and AUC
+roc_clean <- roc_df %>%
+  transmute(Model, AUC = round(Mean, 3))
+
+# Display table
+kable(roc_clean)
 
 ```
 

@@ -82,9 +82,7 @@ testing_data <- testing(data_split)
 
 ## 1.1. Background and Study Objectives
 
-This study aims to build prediction models for identifying factors associated with the incidence of severe flu within 6 months post-vaccination. The analysis focuses on a dataset of 1,000 participants to understand risk factors for severe flu in a population administered the flu vaccine.
-
-The primary objectives of this project are to: (1) evaluate whether advanced predictive modeling techniques like boosting and support vector machines (SVM) provide superior predictive performance compared to simpler models, (2) develop a predictive risk score that quantifies the probability of experiencing severe flu based on individual characteristics, and (3) identify key demographic and clinical factors that predict severe flu risk and assess how these factors influence this risk.
+This study aims to build prediction models for identifying factors associated with the incidence of severe flu within 6 months post-vaccination. The analysis focuses on a dataset of 1,000 participants to understand risk factors for severe flu in a population administered the flu vaccine. The primary objectives of this project are to: (1) evaluate whether advanced predictive modeling techniques like boosting and support vector machines (SVM) provide superior predictive performance compared to simpler models, (2) develop a predictive risk score that quantifies the probability of experiencing severe flu based on individual characteristics, and (3) identify key demographic and clinical factors that predict severe flu risk and assess how these factors influence this risk.
 
 ## 1.2. Data Source and Description
 
@@ -92,9 +90,7 @@ The `severe_flu` dataset used for analysis contains demographic and clinical inf
 
 # 2. Exploratory Analysis
 
-Exploratory data analysis was undertaken to examine the structure of the `severe_flu` dataset, including assessment of data distributions, and relationships between variables. The dataset contains 1,000 observations with 12 variables after removing the ID column. Categorical variables (gender, race, smoking status, diabetes, hypertension, and severe flu outcome) were converted to factors with appropriate labels. The dataset was verified to be complete with no missing observations.
-
-Summary statistics were calculated for all demographic and clinical variables. Visualizations were produced to compare characteristics between participants who did and did not experience severe flu.
+Exploratory data analysis was undertaken to examine the structure of the `severe_flu` dataset, including assessment of data distributions, and relationships between variables. The dataset contains 1,000 observations with 12 variables after removing the ID column. Categorical variables (gender, race, smoking status, diabetes, hypertension, and severe flu outcome) were converted to factors with appropriate labels. The dataset was verified to be complete with no missing observations. Summary statistics were calculated for all demographic and clinical variables. Visualisations were produced to compare characteristics between participants who did and did not experience severe flu.
 
 ## 2.1. Summary Statistics
 
@@ -185,8 +181,6 @@ wrap_elements(combined_histogram_numeric) +
     plot.tag.position = "left"
   )
 
-
-
 ```
 
 **Figure 1. Distribution of continuous predictors in the study dataset**
@@ -195,7 +189,6 @@ Figure 1 presents histogram plots for numeric predictors in the study dataset. A
 
 
 ### 2.2.2. Boxplots
-
 
 ```{r}
 
@@ -292,9 +285,9 @@ Area Under the Receiver Operating Characteristic curve (AUC) was selected as the
 
 # 4. Results
 
-# 4.1. Model Comparison and Selection
+## 4.1. Model Comparison and Selection
 
-Eight predictive models for severe flu occurrence were evaluated: logistic regression, penalized logistic regression (elastic net), linear discriminant analysis (LDA), multivariate adaptive regression splines (MARS), generalized additive model (GAM), linear support vector machine (SVM), radial kernel SVM, and adaptive boosting (AdaBoost).Repeated 10-fold cross-validation (with 5 repeats) was implemented to objectively compare performance across the models, using AUC as the primary evaluation metric. This cross-validation approach allowed for robust comparison while minimizing the risk of overfitting. Models were then assessed on the held-out test set (20% of the original data) to validate performance and ensure the selected model would generalise appropriately to new observations from the same population.
+Eight predictive models for severe flu were evaluated: logistic regression, penalized logistic regression (elastic net), linear discriminant analysis (LDA), multivariate adaptive regression splines (MARS), generalized additive model (GAM), linear support vector machine (SVM), radial kernel SVM, and adaptive boosting (AdaBoost). Repeated 10-fold cross-validation (with 5 repeats) was implemented to objectively compare performance across the models, using AUC as the primary evaluation metric. This cross-validation approach allowed for robust comparison while minimizing the risk of overfitting. Models were then assessed on the held-out test set (20% of the original data) to validate performance and ensure the selected model would generalise appropriately to new observations from the same population.
 
 ```{r}
 
@@ -335,10 +328,172 @@ kable(roc_clean)
 ```
 **Table 2. Mean cross-validated AUC (ROC) values for all candidate models. SVM with a radial kernel achieved the highest average AUC (0.701).**
 
-The cross-validation results show that the SVM with a radial kernel achieved the highest mean AUC (0.701), with penalized logistic regression (0.696) and standard logistic regression (0.695) performing similarly.
+The cross-validation results show that the SVM with a radial kernel achieved the highest mean AUC (0.701). Penalized logistic regression (AUC = 0.696) and standard logistic regression (AUC = 0.695) had a similar performance.
+
+## 4.2. Best performing model evaluation
+
+Based on cross-validation results, the SVM with radial kernel (SVM-radial) was selected as the best performing model, achieving the highest mean AUC (0.701) when implemented. The model was evaluated on the held-out test set to assess its generalizability to new data.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict probabilities on test data using radial SVM
+svm.radial.pred <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
+
+# Convert to class predictions using 0.5 cutoff
+svm.radial.class <- ifelse(svm.radial.pred > 0.5, "Yes", "No")
+
+# Confusion Matrix
+confusionMatrix(factor(svm.radial.class, levels = c("No", "Yes")),
+                testing_data$severe_flu,
+                positive = "Yes")
+
+# ROC and AUC
+roc.svm.radial <- roc(testing_data$severe_flu, svm.radial.pred)
+plot(roc.svm.radial, legacy.axes = TRUE, print.auc = TRUE)
+
+```
+**Figure 5. ROC curve for the SVM-radial model on the test dataset, showing an AUC of 0.699**
+
+The SVM radial kernel model achieved an AUC of 0.699 when fitted on the test dataset, indicating moderate discriminative ability between severe and non-severe flu cases. This is consistent with the cross-validation results (AUC = 0.701), which indicates the model generalises well to unseen data without overfitting. Based on predictions on the test dataset, the accuracy of the radial kernel SVM model is **0.745**, or 74.5%. The misclassification rate is **0.255**, meaning 25.5% of test observations were incorrectly classified. The **P-Value [Acc > NIR] is 0.1554**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class, non-severe flu. Based on test data predictions, the model gave 139 true negatives (non-severe flu cases correctly classified as “No”) and 10 true positives (severe flu cases correctly classified as “Yes”). There were 48 false negatives (severe flu cases misclassified as “No”) and 3 false positives (non-severe cases misclassified as “Yes”). The model showed high specificity (97.89%), accurately identifying individuals who would not develop severe flu. However, its sensitivity was comparatively low (17.24%), indicating limited ability to correctly identify those who would develop severe flu. The Kappa statistic is **0.1963**, representing weak agreement between predicted and actual class labels, only slightly better than chance. These results suggest that while advanced modelling approaches like SVM offer some improvement in predictive performance, the gain may not be practically significant when compared to simpler approaches like logistic regression.
+
+## 4.3. Preferred Model for Clinical Use: Logistic Regression
+
+While SVM radial kernel was slightly better performing, as a black-box model, it lacks interpretability in the context of the study, particularly as it does not provide risk probabilities. In comparison, logistic regression was comparable in predictive performance (AUC = 0.695), with a sensitivity of 0.1897 and specificity of 0.9577. It also has the advantage of offering interpretation through coefficients and predicted probabilities. Therefore, while the SVM radial kernel model may be slightly better for prediction accuracy, logistic regression may be preferred in this clinical context involving risk assessment for individual subjects, consistent with the modelling tradeoffs emphasised in data science practice. As an important consideration, scholars including Kerr et al. (2014) caution that very small improvements in discrimination metrics such as AUC may lack clinical meaning and may not justify the added complexity of new models, especially when they do not translate into improvements in patient outcomes or clinical decision-making. This is further supported by a systematic review of 71 clinical prediction studies which found no performance advantage of complex machine learning methods over traditional logistic regression for clinical use (Christodoulou et al., 2019).
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Predict probabilities on test data
+glm.pred <- predict(model.glm, 
+                    newdata = testing_data, 
+                    type = "prob")[, "Yes"]
+
+# Convert probabilities to class predictions, using 0.5 cutoff
+glm.class <- rep("No", length(glm.pred))
+glm.class[glm.pred > 0.5] <- "Yes"
+
+# Confusion matrix
+confusionMatrix(
+  data = factor(glm.class, levels = c("No", "Yes")),
+  reference = testing_data$severe_flu,
+  positive = "Yes"
+)
+
+# Compute ROC 
+roc.glm <- roc(testing_data$severe_flu, glm.pred)
+
+```
+
+Based on predictions on the test dataset, the accuracy of the logistic regression model is **0.735**, or 73.5%. The misclassification rate is **0.265**, meaning about 26.5% of test observations were incorrectly classified. The P-Value [Acc > NIR] is **0.2434**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class.
+
+The model predictions indicate 136 true negatives (non-severe flu cases correctly classified as “No”), and 11 true positives (severe flu cases correctly classified as “Yes”). The model gave 6 false positives (non-severe flu cases misclassified as “Yes”) and 47 false negatives (severe flu cases misclassified as “No”). Sensitivity was **0.1897**, which shows that the model correctly identified only 18.97% of severe flu cases. By comparison, specificity was **0.9577**, indicating that 95.77% of non-severe cases were correctly classified.
+
+The Kappa statistic was **0.1864**, indicating poor agreement between predicted and actual class labels, beyond what would be expected by chance. 
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Plot the ROC curve and the smoothed ROC curve
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
+
+```
+**Figure 6. ROC curve for the logistic regression model on the test dataset, showing an AUC of 0.703**
+
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although it is not extremely high performing.
+
+## 4.4. Predictive Risk Score
+
+Addressing the second study objective, predicted probabilities (predicted risk scores) were calculated based on the logistic regression model to quantify the likelihood of experiencing severe flu, based on individual participant characteristics.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Distribution of predicted risk scores from final model
+risk_scores <- glm.pred
+
+# predicted probabilities and severe flu outcomes
+risk_df <- data.frame(
+  risk_score = risk_scores,
+  severe_flu = testing_data$severe_flu
+)
+
+# Plot distribution of risk scores
+ggplot(risk_df, aes(x = risk_score, fill = severe_flu)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  scale_fill_manual(values = c("lightblue", "pink")) +
+  labs(x = "Predicted Probability (Risk Score)", 
+       y = "Count",
+       title = "Distribution of Severe Flu Risk Scores") 
+
+```
+
+**Figure 6. Distribution of severe flu risk scores by actual severe flu outcome. The histogram shows the distribution of predicted probabilities from the logistic regression model by outcome (blue = no severe flu, pink = severe flu).**
+
+From the histogram plot, it is observed that there is substantial overlap between subjects who experienced severe flu and those who did not. Although patients who developed severe flu tend to be higher in the upper ranges of predicted probabilities (above 0.4) and slightly lower representation in the lowest risk range (0.1-0.2), many still received relatively low risk scores. The overlap in distributions for both severe and non-severe flu groups suggests the model performs relatively well in assigning higher risk to true cases, but it does not reliably distinguish the two groups. This likely reflects the model's modest discriminative ability as well as the class imbalance in the dataset.
+
+### 4.5. Key demographic and clinical predictors of Severe Flu 
+
+```{r}
+
+# Model summary
+summary(model.glm$finalModel)
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Extract coefficients from logistic regression model
+log_coef <- coef(model.glm$finalModel)
+log_odds <- exp(log_coef)
+coef_df <- data.frame(
+  Predictor = names(log_coef),
+  Coefficient = log_coef,
+  OddsRatio = log_odds
+)
+
+# Display coefficients and odds ratios
+kable(coef_df, digits = 3, caption = "Logistic Regression Coefficients and Odds Ratios")
+
+# Create a coefficient plot for visualization
+coef_plot_data <- coef_df[-1, ] # Remove intercept for plotting
+coef_plot_data$Predictor <- factor(coef_plot_data$Predictor)
+coef_plot_data$Direction <- ifelse(coef_plot_data$Coefficient > 0, "Positive", "Negative")
+
+ggplot(coef_plot_data, aes(x = reorder(Predictor, Coefficient), y = Coefficient, fill = Direction)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("Negative" = "lightblue", "Positive" = "pink")) +
+  labs(title = "Logistic Regression Coefficients",
+       x = "Predictor",
+       y = "Coefficient (Log Odds)") +
+  theme_minimal()
+
+```
+
+
+# 5. Limitations
+
+The main limitation of this study is the class imbalance, which most likely contributed to low sensitivity across models. Although models such as SVM-radial performed well on AUC, they did not significantly outperform the no information rate when evaluated at a 0.5 threshold. Additionally, black-box models offer limited interpretability, which makes them less practical in clinical or decision-making contexts. 
+
+# 6. Conclusion
+
+
 
 # References
 
+Christodoulou, E., Ma, J., Collins, G. S., Steyerberg, E. W., Verbakel, J. Y., & Van Calster, B. (2019). A systematic review shows no performance benefit of machine learning over logistic regression for clinical prediction models. Journal of clinical epidemiology, 110, 12-22.
+
 Hosmer, D. W., Lemeshow, S., & Sturdivant, R. X. (2013). Applied logistic regression (3rd ed.). John Wiley & Sons.
+
+Kerr, K. F., Wang, Z., Janes, H., McClelland, R. L., Psaty, B. M., & Pepe, M. S. (2014). Net reclassification indices for evaluating risk prediction instruments: A critical review. Epidemiology, 25(1), 114–121. https://doi.org/10.1097/EDE.0000000000000018:contentReference[oaicite:3]{index=3}
 
 Kuhn, M., & Johnson, K. (2013). Applied predictive modeling. Springer.RetryClaude can make mistakes. Please double-check responses.
