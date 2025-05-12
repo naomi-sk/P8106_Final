@@ -34,6 +34,8 @@ library(visdat)
 library(vip)
 library(tidymodels)
 library(knitr)
+library(pdp)
+library(e1071)
 
 ```
 
@@ -70,9 +72,6 @@ flu_df <- dplyr::select(flu_df, -id)
 # Check data structure
 str(flu_df)
 
-# Set 10-fold cross-validation
-ctrl1 <- trainControl(method = "cv", number = 10)
-
 # Split data into testing and training
 data_split <- initial_split(flu_df, prop = 0.8)
 training_data <- training(data_split)
@@ -81,9 +80,18 @@ testing_data <- testing(data_split)
 # Check levels of response variable
 levels(training_data$severe_flu)
 
+# Set preprocessing
+preproc <- c("center", "scale", "zv")
+
+# Set up cross validation control - with 5 repeats
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 5,
+                     summaryFunction = defaultSummary,
+                     classProbs = TRUE)
+
 ```
 
-The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories. Data was then split into training and testing datasets. The ID variable was removed.
+The data was loaded and inspected. No missing data was identified. Subsequently, factor variables were recoded appropriately to preserve categories. Data was then split into training and testing datasets. The ID variable was removed. An additional preprocessing setting was set.
 
 
 # Exploratory Data Analysis
@@ -240,17 +248,11 @@ Among categorical predictors, there appears to be differences in severe flu rate
 # Set seed for reproducibility
 set.seed(299)
 
-# Set up cross validation control
-ctrl <- trainControl(method = "repeatedcv", 
-                     repeats = 5,
-                     summaryFunction = twoClassSummary,
-                     classProbs = TRUE)
-
 # Train logistic regression model with CV
 model.glm <- train(severe_flu ~ ., 
                    data = training_data,
                    method = "glm",
-                   metric = "ROC",
+                   preProcess = preproc,
                    trControl = ctrl)
 
 # Predict probabilities on test data
@@ -258,9 +260,9 @@ glm.pred <- predict(model.glm,
                     newdata = testing_data, 
                     type = "prob")[, "Yes"]
 
-# Convert probabilities to class predictions, using 0.5 cutoff
+# Convert probabilities to class predictions, using 0.3 cutoff
 glm.class <- rep("No", length(glm.pred))
-glm.class[glm.pred > 0.5] <- "Yes"
+glm.class[glm.pred > 0.3] <- "Yes"
 
 # Confusion matrix
 confusionMatrix(
@@ -278,21 +280,21 @@ plot(smooth(roc.glm), col = 4, add = TRUE)
 
 ```
 
-I proceeded with using confusion matrix to evaluate how well the model classifies observations into severe and non-severe flu categories. I used a 0.5 cutoff, following the Bayes decision rule, which assigns an observation to the most likely class. In this case, the model predicts 'severe' when Pr(Y=1 | X) > 0.5, and 'not severe' otherwise.
+I proceeded with using confusion matrix to evaluate how well the model classifies observations into severe and non-severe flu categories. I used a 0.3 probability threshold to assign predicted classes. This threshold was selected in line with the recommendation by Saito and Rehmsmeier (2015), who note that threshold selection make careful consideration of imbalanced classification problems. Under this rule, the model classifies an observation as “severe flu” when the predicted probability Pr(Y=1∣X)>0.3, and “non-severe flu” otherwise. This adjustment was chosen to prioritise sensitivity by reducing the likelihood of false negatives, which is relevant for our study.
 
-Based on the confusion matrix, the accuracy of the logistic regression model is **0.735**, or 73.5%. The misclassification rate is
-1 − Accuracy = **0.265**, meaning about 26.5% of test observations were incorrectly classified.
+Based on the confusion matrix, the accuracy of the logistic regression model is **0.695**, or 69.5%. The misclassification rate is
+1 − Accuracy = **0.305**, meaning about 30.5% of test observations were incorrectly classified.
 
-The P-Value [Acc > NIR] is **0.2434**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class.
+The P-Value [Acc > NIR] is **0.7098**, which indicates that the model’s accuracy is not statistically significantly greater than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class.
 
-The matrix shows 136 true negatives (non-severe flu cases correctly classified as “No”), and 11 true positives (severe flu cases correctly classified as “Yes”). There are 6 false positives (non-severe flu cases misclassified as “Yes”) and 47 false negatives (severe flu cases misclassified as “No”).
+The matrix shows 112 true negatives (non-severe flu cases correctly classified as “No”), and 27 true positives (severe flu cases correctly classified as “Yes”). There are 30 false positives (non-severe flu cases misclassified as “Yes”) and 31 false negatives (severe flu cases misclassified as “No”).
 
-Sensitivity was **0.1897**, which shows that the model correctly identified only 18.97% of severe flu cases.
-Specificity was **0.9577**, indicating that 95.77% of non-severe cases were correctly classified.
+Sensitivity was **0.4655**, which shows that the model correctly identified 46.55% of severe flu cases.
+Specificity was **0.7887**, indicating that 78.87% of non-severe cases were correctly classified.
 
-The Kappa statistic was **0.1864**, indicating poor agreement between predicted and actual class labels, beyond what would be expected by chance.
+The Kappa statistic was **0.2556**, indicating fair agreement between predicted and actual class labels, beyond what would be expected by chance.
 
-The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although it is not extremely high performing.
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds.
 
 
 ## Penalized Logistic Regression
@@ -302,22 +304,17 @@ The ROC curve indicates the model has moderate classification performance, with 
 # Set seed for reproducibility
 set.seed(299)
 
-# Set preprocessing
-preproc <- c("center", "scale", "zv")
-
 
 # Define tuning grid for penalized logistic regression
-#glmnGrid <- expand.grid(.alpha = seq(0, 0.2, length = 21),
-#                        .lambda = exp(seq(-8, 0, length = 50)))
 glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 21),
                         .lambda = exp(seq(-8, 0, length = 50)))
+
 # Fit model with CV
 model.glmn <- train(severe_flu ~ .,
                     data = training_data,
                     preProcess = preproc,
                     method = "glmnet",
                     tuneGrid = glmnGrid,
-                    metric = "ROC",
                     trControl = ctrl)
 
 # Show best tuning parameters
@@ -335,11 +332,12 @@ coef(model.glmn$finalModel, model.glmn$bestTune$lambda)
 
 ```
 
-I tuned elastic net logistic regression with cross-validation to predict severe flu occurrence. A preprocessing step was undertaken during model training to ensure numeric predictors were centered and scaled. Initially, I performed a grid search across alpha values from 0 to 1 and lambda values from exp(-8) to exp(0). When results showed optimal alpha=0, I refined the search with a narrower grid from 0 to 0.2 to confirm this finding. The optimal parameters (**alpha = 0, lambda = 0.8493658**) indicate that pure ridge regression provides the best predictive performance for this dataset. 
+I tuned elastic net logistic regression with cross-validation to predict severe flu occurrence. A preprocessing step was undertaken during model training to ensure numeric predictors were centered and scaled. I performed a grid search across alpha values from 0 to 1 and lambda values from exp(-8) to exp(0). The optimal parameters (**alpha = 0.85, lambda = 0.003883492**) were identified, favouring lasso.
 
-The plot displays Area Under the Curve on the y-axis, representing classification performance, against log-transformed lambda values (regularization) on the x-axis, with each line representing a different alpha mixing percentage. This confirms that ridge regression (alpha = 0) gives the largest AUC across regularization strengths, with the best performance observed at a lambda value of approximately 0.85.
+The plot displays cross-validated accuracy on the y-axis, representing classification performance on the training data, against log-transformed lambda values (regularisation) on the x-axis, with each curve representing a different alpha mixing percentage. This confirms that lasso dominant model gives the best accuracy across regularization strengths, with the best performance observed at a lambda value of approximately 0.0039.
 
-The final model retained all predictors, although many were shrunk towards zero. The largest coefficients were observed for BMI (0.1089), weight (0.0674), and LDL (0.0333). Several other coefficients, including raceAsian and SBP, were shrunk to be closer to zero.
+The final model retained all predictors except weight. although many were shrunk towards zero. The largest coefficients were observed for BMI (0.702), LDL (0.184), diabetesYes (0.150), and smokingCurrent (0.150), indicating these variables contributed most strongly to predicting severe flu in the model. Several other variables, including SBP (–0.0013), height (–0.0257), and raceAsian (0.0468) were shrunk closer to 0, and therefore had smaller effect.
+
 
 ```{r}
 
@@ -359,16 +357,16 @@ plot(smooth(roc.glmn), col = 4, add = TRUE)
 
 ```
 
-The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.707**. This indicates the model is able to classify severe and non-severe cases across classification thresholds.
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.710**. This indicates the model is able to classify severe and non-severe cases across classification thresholds.
 
 ```{r}
 
 # Set seed for reproducibility
 set.seed(299)
 
-# Classify using 0.5 cutoff
+# Classify using 0.3 cutoff
 glmn.class <- rep("No", length(glmn.pred))
-glmn.class[glmn.pred > 0.5] <- "Yes"
+glmn.class[glmn.pred > 0.3] <- "Yes"
 
 # Generate confusion matrix
 confusionMatrix(
@@ -384,7 +382,19 @@ plot(roc.glmn.fit, legacy.axes = TRUE, print.auc = TRUE)
 
 ```
 
-These results show that at the default 0.5 classification threshold, the model failed to predict any positive cases, which corresponds with 0 sensitivity. This underscores a potential limitation of using a fixed threshold when there is an imbalance in classes, even though the model’s AUC (0.707) indicates moderate overall performance in classifying severe and non-severe flu cases.
+Based on the confusion matrix, the accuracy of the penalized logistic regression model is **0.695**, or 69.5%. The misclassification rate is
+1 − Accuracy = **0.305**, meaning about 30.5% of test observations were incorrectly classified.
+
+The P-Value [Acc > NIR] is **0.7098**, which indicates that the model’s accuracy is not statistically significantly greater than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class.
+
+The matrix shows 109 true negatives (non-severe flu cases correctly classified as “No”) and 30 true positives (severe flu cases correctly classified as “Yes”). There are 33 false positives (non-severe flu cases misclassified as “Yes”) and 28 false negatives (severe flu cases misclassified as “No”).
+
+Sensitivity was **0.5172**, which shows that the model correctly identified 51.72% of severe flu cases.
+Specificity was **0.7676**, indicating that 76.76% of non-severe cases were correctly classified.
+
+The Kappa statistic was **0.2778**, indicating fair agreement between predicted and actual class labels, beyond what would be expected by chance.
+
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.710**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds.
 
 ## LDA
 
@@ -403,16 +413,16 @@ plot(lda.fit)
 # Fit LDA model using caret
 model.lda <- train(severe_flu ~ .,
                    data = training_data,
+                   preProcess = preproc,
                    method = "lda",
-                   metric = "ROC",
                    trControl = ctrl)
 
 # Predict probabilities for test data
 lda.pred <- predict(model.lda, newdata = testing_data, type = "prob")
 
-# Classify using 0.5 cutoff
+# Classify using 0.3 cutoff
 lda.class <- rep("No", length(lda.pred[, "Yes"]))
-lda.class[lda.pred[, "Yes"] > 0.5] <- "Yes"
+lda.class[lda.pred[, "Yes"] > 0.3] <- "Yes"
 
 # Generate confusion matrix
 confusionMatrix(
@@ -427,21 +437,20 @@ plot(roc.lda, legacy.axes = TRUE, print.auc = TRUE)
 
 ```
 
-I fit the LDA model using the MASS package initially, examining the distribution of the LDA discriminant scores (Z = aᵗX) for each class. From the histogram, we can see there is some separation between the linear discriminant scores for the “No” and “Yes” severe flu groups. This suggests that the model is able to distinguish between the two classes using a linear combination of the predictors. I then proceeded to fit the model using caret.
+I fit the LDA model using the MASS package initially, examining the distribution of the LDA discriminant scores (Z = aᵗX) for each class. From the histogram, we can see there is very little separation between the linear discriminant scores for the “No” and “Yes” severe flu groups. I then proceeded to fit the model using caret.
 
-Based on the confusion matrix from test data predictions, the accuracy of the LDA model is **0.74**, or 74.0%. The misclassification rate is 1 − Accuracy = **0.26**, meaning about 26% of test observations were incorrectly classified.
+Based on the confusion matrix from test data predictions, the accuracy of the LDA model is **0.715**, or 71.5%. The misclassification rate is 1 − Accuracy = **0.285**, meaning about 28.5% of test observations were incorrectly classified.
 
-The **P-Value [Acc > NIR] is 0.1965**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not significantly outperform a naive classifier that always predicts the majority class.
+The **P-Value [Acc > NIR] is 0.4733**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not significantly outperform a naive classifier that always predicts the majority class.
 
-The matrix shows 136 true negatives (non-severe flu cases correctly classified as “No”) and 12 true positives (severe flu cases correctly classified as “Yes”). There are 6 false positives (non-severe flu cases misclassified as “Yes”) and 46 false negatives (severe flu cases misclassified as “No”).
+The matrix shows 116 true negatives (non-severe flu cases correctly classified as “No”) and 27 true positives (severe flu cases correctly classified as “Yes”). There are 26 false positives (non-severe flu cases misclassified as “Yes”) and 31 false negatives (severe flu cases misclassified as “No”).
 
-Sensitivity was **0.2069**, indicating that the model correctly identified only 20.69% of severe flu cases.
-Specificity was **0.9577**, meaning 95.77% of non-severe cases were correctly classified.
+Sensitivity was **0.4655**, indicating that the model correctly identified 46.55% of severe flu cases.
+Specificity was **0.8169**, meaning 81.69% of non-severe cases were correctly classified.
 
-The Kappa statistic was **0.2068**, indicating weak agreement between the predicted and actual class labels, although slightly better than what would be expected by chance.
+The Kappa statistic was **0.2898**, indicating fair agreement between the predicted and actual class labels, slightly better than what would be expected by chance.
 
-
-The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.709**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although its performance is limited.
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.709**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds.
 
 # Moderately Complex models
 
@@ -463,7 +472,6 @@ model.mars <- train(severe_flu ~ .,
                     data = training_data,
                     method = "earth",
                     tuneGrid = mars_grid,
-                    metric = "ROC",
                     trControl = ctrl)
 
 # Plot CV results
@@ -532,7 +540,7 @@ plot(smooth(roc.mars), col = 4, add = TRUE)
 
 ```
 
-Based on the ROC curve, the GAM model achieved an AUC of 0.668, representing modest classification performance on the test set. It is able to classify severe and non-severe flu cases better than chance, but it is not high performing.
+Based on the ROC curve, the MARS model achieved an AUC of 0.668, representing modest classification performance on the test set. It is able to classify severe and non-severe flu cases better than chance, but it is not extremely high performing.
 
 ## GAM
 
@@ -546,7 +554,6 @@ model.gam <- train(
   severe_flu ~ .,
   data = training_data,
   method = "gam",
-  metric = "ROC",
   trControl = ctrl
 )
 
@@ -564,8 +571,7 @@ par(mfrow = c(1, 1)) # Reset plotting window
 
 ```
 
-Among the continuous predictors, BMI and height are modelled as approximately linear with estimated degrees of freedom (edf) approximately 1 and statistically significant smooth terms (p < 0.05). Based on the predictor plots, these variables show linear relationships with severe flu, consistent with their estimated degrees of freedom. The smooth terms for LDL and weight are statistically significant (p < 0.05), with estimated degrees of freedom of 2.15 and 1.96 respectively, indicating nonlinear relationships with severe flu. The LDL plot appears to show flatness, indicating a slight nonlinear effect. In contrast, a clear  downward trend for weight is observable, showing slight nonlinearity represented by the smooth term.
-Predictors age and SBP are not statistically significant, although they are modeled as approximately linear (edf = 1). 
+Among the continuous predictors, BMI and height are modelled as approximately linear with estimated degrees of freedom (edf) approximately 1 and statistically significant smooth terms (p < 0.05). Based on the predictor plots, these variables show linear relationships with severe flu, consistent with their estimated degrees of freedom. The smooth terms for LDL and weight are statistically significant (p < 0.05), with estimated degrees of freedom of 2.15 and 1.96 respectively, indicating nonlinear relationships with severe flu. The LDL plot appears to show some nonlinearity but is comparably flat. In contrast, a clear  downward trend for weight is observable, showing slight nonlinearity represented by the smooth term. Predictors age and SBP are not statistically significant, although they are modeled as approximately linear (edf = 1). 
 
 ```{r}
 
@@ -601,55 +607,40 @@ set.seed(299)
 # Fit model using SVM (linear)
 svml.fit <- train(severe_flu ~ . ,
                   data = training_data,
+                  preProcess = preproc,
                   method = "svmLinear",
-                  tuneGrid = data.frame(C = exp(seq(-5, 2, len = 50))),
+                  tuneGrid = data.frame(C = exp(seq(-6, 2, len = 50))),
                   trControl = ctrl)
 
 # Plot
 plot(svml.fit, highlight = TRUE, xTrans = log)
 
 # Find optimal
-svml.fit$bestTune # optimal C = 0.05743262
-
-exp(-5) # 0.006737947
-exp(2) # 7.389056
+svml.fit$bestTune # optimal C = 0.004762708
 
 ```
 
-The optimal cost tuning parameter is 0.057, selected from the grid exp(seq(-5, 2)). Since this value is not at the boundary, no further grid expansion is needed. 
-Based on the cross-validation plot, the best performance was achieved at a cost value of approximately 0.057, with a maximum AUC of about 0.689. Note that the x-axis representing the cost parameter is log-scaled.
+The optimal cost tuning parameter is approximately 0.00476, selected from the grid exp(seq(-6, 2)). Since this value is not at the boundary, no further grid expansion is needed. 
+Based on the cross-validation plot, the best performance was achieved at a cost value of approximately 0.00476, with a maximum accuracy of about 0.689. Note that the x-axis representing the cost parameter is log-scaled.
 
 ```{r}
 
 # Set seed for reproducibility
 set.seed(299)
 
-# Predict based on test data
-svm.linear.pred <- predict(svml.fit, newdata = testing_data, type = "prob")[, "Yes"]
-svm.linear.class <- ifelse(svm.linear.pred > 0.5, "Yes", "No")
-
-# Confusion Matrix
-confusionMatrix(factor(svm.linear.class, levels = c("No", "Yes")),
-                testing_data$severe_flu,
-                positive = "Yes")
-
-# Plot AUC
-roc.svm.linear <- roc(testing_data$severe_flu, svm.linear.pred)
-plot(roc.svm.linear, legacy.axes = TRUE, print.auc = TRUE)
+# Confusion Matrix based on test data - for Accuracy/Kappa
+confusionMatrix(
+  factor(predict(svml.fit, newdata = testing_data), levels = c("No", "Yes")),
+  testing_data$severe_flu,
+  positive = "Yes"
+)
 
 ```
 
-Based on the confusion matrix from test data predictions, the accuracy of the linear SVM model is **0.72**, or 72%. The misclassification rate is 1 − Accuracy = **0.28**, meaning 28% of test observations were incorrectly classified.
+Based on the confusion matrix from test data predictions, the accuracy of the linear SVM model is **0.735**, or 73.5%. The misclassification rate is 1 − Accuracy = **0.265**, meaning 26.5% of test observations were incorrectly classified.
 
-The **P-Value [Acc > NIR] is 0.4117**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
-
-The confusion matrix shows 140 true negatives (non-severe flu cases correctly classified as “No”) and 4 true positives (severe flu cases correctly classified as “Yes”). There were 54 false negatives (severe flu cases misclassified as “No”) and 2 false positives (non-severe cases misclassified as “Yes”).
-
-Sensitivity was **0.06897**, meaning 6.9% of severe flu cases were correctly identified. Specificity was comparably high at **0.98592**, indicating the model correctly identified 98.6% of non-severe cases.
-
-The Kappa statistic was **0.0747**, showing very weak agreement between predicted and actual class labels, only slightly better than chance.
-
-The ROC curve shows an **AUC of 0.699**, suggesting modest overall classification performance. While the model achieves a reasonable tradeoff between sensitivity and specificity across thresholds, it has very low sensitivity which suggests it may not be practically useful for classification.
+The **P-Value [Acc > NIR] is 0.2434**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
+The Kappa statistic was **0.1648**, showing poor agreement between predicted and actual class labels, only slightly better than chance.
 
 
 ## Radial Kernel SVM
@@ -661,51 +652,38 @@ set.seed(299)
 
 # Define tuning grid for Radial Kernel
 svmr.grid <- expand.grid(C = exp(seq(-1, 5, len = 10)),
-                         sigma = exp(seq(-10, -4, len = 6)))
+                         sigma = exp(seq(-12, -2, len = 10)))
 
 # Fit radial kernel model
 svmr.fit <- train(severe_flu ~ . , 
                   data = training_data,
                   method = "svmRadialSigma",
+                  preProcess = preproc,
                   tuneGrid = svmr.grid,
                   trControl = ctrl)
 
 # Best sigma and cost
-svmr.fit$bestTune
-
-# Define colour scheme
-myCol <- rainbow(25)
-myPar <- list(superpose.symbol = list(col = myCol),
-              superpose.line = list(col = myCol))
+svmr.fit$bestTune # sigma = 0.00482795
 
 # Plot
-plot(svmr.fit, highlight = TRUE, par.settings = myPar)
+plot(svmr.fit, highlight = TRUE, xTrans = log)
 
 ```
 
-I then proceeded to fit a support vector machine with radial kernel model, exploring different grids for the tuning parameters cost and sigma to ensure the optimal tuning parameters were appropriately within their respective grid ranges and not at the boundary of the grid. The best **cost** tuning parameter for this model is **2.718282**, and the best **sigma** tuning parameter is **0.0005004514**. 
+I then proceeded to fit a support vector machine with radial kernel model, exploring different grids for the tuning parameters cost and sigma to ensure the optimal tuning parameters were appropriately within their respective grid ranges and not at the boundary of the grid. The best **cost** tuning parameter for this model is **39.12128**, and the best **sigma** tuning parameter is **0.00482795**. This is evident in the plot, which represents model accuracy across the full range of sigma values at different cost levels.
 
-The plot of cross-validated AUC shows the best performance was around 0.70 corresponding to the optimal tuning parameters identified for the radial support vector machine.
 
 ```{r}
 
 # Set seed for reproducibility
 set.seed(299)
 
-# Predict probabilities on test data using radial SVM
-svm.radial.pred <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
-
-# Convert to class predictions using 0.5 cutoff
-svm.radial.class <- ifelse(svm.radial.pred > 0.5, "Yes", "No")
-
-# Confusion Matrix
-confusionMatrix(factor(svm.radial.class, levels = c("No", "Yes")),
-                testing_data$severe_flu,
-                positive = "Yes")
-
-# ROC and AUC
-roc.svm.radial <- roc(testing_data$severe_flu, svm.radial.pred)
-plot(roc.svm.radial, legacy.axes = TRUE, print.auc = TRUE)
+# Confusion Matrix based on test data - for Accuracy/Kappa
+confusionMatrix(
+  factor(predict(svmr.fit, newdata = testing_data), levels = c("No", "Yes")),
+  testing_data$severe_flu,
+  positive = "Yes"
+)
 
 ```
 
@@ -713,21 +691,85 @@ Based on the confusion matrix from test data predictions, the accuracy of the ra
 
 The **P-Value [Acc > NIR] is 0.1554**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class.
 
-The confusion matrix shows 139 true negatives (non-severe flu cases correctly classified as “No”) and 10 true positives (severe flu cases correctly classified as “Yes”). There were 48 false negatives (severe flu cases misclassified as “No”) and 3 false positives (non-severe cases misclassified as “Yes”).
+The Kappa statistic was **0.1963**, representing poor agreement between predicted and actual class labels, only slightly better than chance.
 
-Sensitivity was **0.1724**, meaning 17.24% of severe flu cases were correctly identified. Specificity was higher at **0.9789**, indicating the model correctly identified 97.89% of non-severe cases.
-
-The Kappa statistic was **0.1963**, representing weak agreement between predicted and actual class labels, only slightly better than chance.
-
-The ROC curve shows an **AUC of 0.699**, indicating modest overall classification performance. The model achieves a reasonable tradeoff between sensitivity and specificity across thresholds, although its sensitivity is relatively low, limiting its practical use.
 
 ```{r}
 
 # Set seed for reproducibility
 set.seed(299)
 
+# PDP for age
+pdp_age <- partial(svmr.fit, pred.var = "age", train = training_data, prob = TRUE)
+plot_age <- autoplot(pdp_age) + ggtitle("Age") + theme(plot.title = element_text(size = 10))
+
+# PDP for height
+pdp_height <- partial(svmr.fit, pred.var = "height", train = training_data, prob = TRUE)
+plot_height <- autoplot(pdp_height) + ggtitle("Height") + theme(plot.title = element_text(size = 10))
+
+# PDP for weight
+pdp_weight <- partial(svmr.fit, pred.var = "weight", train = training_data, prob = TRUE)
+plot_weight <- autoplot(pdp_weight) + ggtitle("Weight") + theme(plot.title = element_text(size = 10))
+
+# PDP for bmi
+pdp_bmi <- partial(svmr.fit, pred.var = "bmi", train = training_data, prob = TRUE)
+plot_bmi <- autoplot(pdp_bmi) + ggtitle("BMI") + theme(plot.title = element_text(size = 10))
+
+# PDP for SBP
+pdp_sbp <- partial(svmr.fit, pred.var = "SBP", train = training_data, prob = TRUE)
+plot_sbp <- autoplot(pdp_sbp) + ggtitle("SBP") + theme(plot.title = element_text(size = 10))
+
+# PDP for LDL
+pdp_ldl <- partial(svmr.fit, pred.var = "LDL", train = training_data, prob = TRUE)
+plot_ldl <- autoplot(pdp_ldl) + ggtitle("LDL") + theme(plot.title = element_text(size = 10))
+
+# Combine into one figure (2 rows of 3)
+(plot_age | plot_height | plot_weight) / (plot_bmi | plot_sbp | plot_ldl)
+
 ```
 
+**Figure. The partial dependence plots are calculated using the SVM's decision function outputs, as the model does not provide probability estimates.  The estimated risk of severe flu increased with weight and decreased at lower values, whereas it declined over higher BMI. Age and SBP showed nonlinear patterns, with the risk of being classified as having severe flu reaching a peak at the middle of the range. Higher LDL and height were associated with lower estimate risk of severe flu.**
+
+As SVM with radial kernel is a black-box model, partial dependence plots for interpretation are needed.
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Match caret tuning parameters: cost = 39.12128, sigma = 0.00482795
+best_sigma <- 0.00482795
+best_cost <- 39.12128
+best_gamma <- 1 / (2 * best_sigma^2)
+
+# Refit using e1071::svm
+svm.radial.e1071 <- svm(severe_flu ~ .,
+                        data = training_data,
+                        kernel = "radial",
+                        cost = best_cost,
+                        gamma = best_gamma,
+                        probability = TRUE)
+
+# Plot decision boundary 
+plot(svm.radial.e1071,
+     data = training_data,
+     age ~ LDL,
+     slice = list(gender = "Male",
+                  race = "White",
+                  smoking = "Never",
+                  height = 173.1,
+                  weight = 91.8,
+                  bmi = 29,
+                  diabetes = "Yes",
+                  hypertension = "No",
+                  SBP = 116),
+     grid = 100,
+     symbolPalette = c("cyan", "darkblue"),
+     color.palette = heat.colors)
+
+```
+
+**Figure. SVM radial kernel decision boundary using age and LDL as predictors. The overdominating red indicates significant class imbalance in the dataset, representing the model’s tendency to classify most observations as non-severe flu.**
 
 
 ## Boosting
@@ -750,7 +792,6 @@ gbmA.fit <- train(severe_flu ~ . ,
                   trControl = ctrl,
                   method = "gbm",
                   distribution = "adaboost",
-                  metric = "ROC",
                   verbose = FALSE)
 
 # Identify best tuning parameters
@@ -761,7 +802,7 @@ ggplot(gbmA.fit, highlight = TRUE)
 
 ```
 
-I then proceeded to perform boosting using adaboost. I tuned the grid keeping interaction.depth at 3, which was appropriate as it gave me n.trees and shrinkage values not at the boundary of their respective grids. Based on this model, the optimal tuning parameters were **n.trees = 500, interaction.depth = 1, shrinkage = 0.003, and n.minobsinnode = 10**, based on cross validation AUC. Based on the plot, the AUC appears to peak at approximately 0.69 for these parameters.
+I then proceeded to perform boosting using adaboost. I tuned the grid keeping interaction.depth at 3, which was appropriate as it gave me n.trees and shrinkage values not at the boundary of their respective grids. Based on this model, the optimal tuning parameters were **n.trees = 500, interaction.depth = 2, shrinkage = 0.003, and n.minobsinnode = 10**, based on cross validation accuracy. Based on the plot, the accuracy appears to peak at approximately 0.79 for these parameters.
 
 ```{r}
 
@@ -773,7 +814,7 @@ summary(gbmA.fit$finalModel, las = 2, cBars = 19, cex.names = 0.6)
 
 ```
 
-From this, we can see the most important predictor appears to be **BMI**, followed by **LDL** and **height**, respectively. The least important variables based on this model appear to be **HypertensionYes**, as well as **smokingFormer** and **raceBlack**.
+From this, we can see the most important predictor appears to be **BMI**, followed by **LDL** and **age**, respectively. The least important variables based on this model appear to be **raceAsian**, as well as **raceBlack** and **hypertensionYes**.
 
 Next, finding test error:
 
@@ -797,7 +838,7 @@ col = 1:2, lwd = 2)
 
 ```
 
-To find the test performance for this model, I computed the AUC (area under the ROC curve). Based on the plot, **AUC was 0.674**, which represents moderate classification performance for predicting severe flu on the test set. This would indicate that the adaboost model has limited reliability in classifying severe flu cases.
+To find the test performance for this model, I computed the AUC (area under the ROC curve). Based on the plot, **AUC was 0.665**, which represents moderate classification performance for predicting severe flu on the test set. 
 
 # Model Comparison
 
@@ -817,81 +858,22 @@ res <- resamples(list(Logistic_Regression = model.glm,
                       AdaBoost = gbmA.fit))
 summary(res)
 
-# Extract mean AUC values 
-roc_df <- as_tibble(summary(res)$statistics$ROC, rownames = "Model")
-
-# Select only Model and AUC
-roc_clean <- roc_df %>%
-  transmute(Model, AUC = round(Mean, 3))
-
-# Display table
-kable(roc_clean)
+bwplot(res)
 
 ```
 
-The cross validation summary show that SVM with radial kernel achieved the highest mean AUC (0.701), followed closely by penalized logistic regression (0.696) and logistic regression (0.695).
-
-Looking at test errors for the models:
-
-```{r}
-
-# Set seed for reproducibility
-set.seed(299)
-
-# Generate test set predictions for all models
-glm.pred   <- predict(model.glm, newdata = testing_data, type = "prob")[, "Yes"]
-glmn.pred  <- predict(model.glmn, newdata = testing_data, type = "prob")[, "Yes"]
-lda.pred   <- predict(model.lda, newdata = testing_data, type = "prob")[, "Yes"]
-mars.pred  <- predict(model.mars, newdata = testing_data, type = "prob")[, "Yes"]
-gam.pred   <- predict(model.gam, newdata = testing_data, type = "prob")[, "Yes"]
-svml.pred  <- predict(svml.fit, newdata = testing_data, type = "prob")[, "Yes"]
-svmr.pred  <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
-gbmA.pred  <- predict(gbmA.fit, newdata = testing_data, type = "prob")[, "Yes"]
-
-# Compute ROC for each
-roc.glm <- roc(testing_data$severe_flu, glm.pred)
-roc.glmn <- roc(testing_data$severe_flu, glmn.pred)
-roc.lda <- roc(testing_data$severe_flu, lda.pred)
-roc.mars <- roc(testing_data$severe_flu, mars.pred)
-roc.gam <- roc(testing_data$severe_flu, gam.pred)
-roc.svml <- roc(testing_data$severe_flu, svml.pred)
-roc.svmr <- roc(testing_data$severe_flu, svmr.pred)
-roc.gbmA <- roc(testing_data$severe_flu, gbmA.pred)
-
-# List of AUCs
-auc <- c(
-  roc.glm$auc[1],
-  roc.glmn$auc[1],
-  roc.lda$auc[1],
-  roc.mars$auc[1],
-  roc.gam$auc[1],
-  roc.svml$auc[1],
-  roc.svmr$auc[1],
-  roc.gbmA$auc[1]
-)
-
-modelNames <- c(
-  "Logistic", "Penalized Logistic", "LDA", "MARS",
-  "GAM", "SVM Linear", "SVM Radial", "AdaBoost"
-)
-
-# Plot ROC curves
-ggroc(list(
-  roc.glm, roc.glmn, roc.lda, roc.mars,
-  roc.gam, roc.svml, roc.svmr, roc.gbmA
-), legacy.axes = TRUE) +
-  scale_color_discrete(
-    labels = paste0(modelNames, " (", round(auc, 3), ")"),
-    name = "Models (AUC)"
-  ) +
-  geom_abline(intercept = 0, slope = 1, color = "grey") +
-  ggtitle("ROC Curves for All Models (Test Data Performance)") 
-
-```
+* SVM Radial Kernel had the highest mean accuracy (0.7755392), however logistic regression had a very similar mean accuracy as well (0.7750330).
+* LDA (0.22142223) and GAM (0.21998921) had the highest Kappa values. However, logistic regression was also very similar (0.21524449).
+* Both SVM Linear and SVM Radial kernel had comparably lower Kappa values (0.09512335 and 0.17142539, respectively).
+* Therefore, GAM, LDA, and Logistic Regression offer the best combination of accuracy and Kappa.
 
 # References
+
+McHugh, M. L. (2012). Interrater reliability: the kappa statistic. Biochemia medica, 22(3), 276-282.
 
 Molnar, C. (2022). Interpretable machine learning: A guide for making black box models explainable (2nd ed.). https://christophm.github.io/interpretable-ml-book
 
 Goldstein, A., Kapelner, A., Bleich, J., & Pitkin, E. (2015). Peeking inside the black box: Visualizing statistical learning with plots of individual conditional expectation. journal of Computational and Graphical Statistics, 24(1), 44-65.
+
+Saito, T., & Rehmsmeier, M. (2015). The precision-recall plot is more informative than the ROC plot when evaluating binary classifiers on imbalanced datasets. PloS one, 10(3), e0118432.
 

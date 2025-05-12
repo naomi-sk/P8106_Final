@@ -47,6 +47,8 @@ library(visdat)
 library(vip)
 library(tidymodels)
 library(knitr)
+library(pdp)
+library(e1071)
 
 # Set seed for reproducibility
 set.seed(299)
@@ -68,13 +70,19 @@ flu_df <- flu_df %>%
 # Drop ID
 flu_df <- dplyr::select(flu_df, -id)
 
-# Set 10-fold cross-validation
-ctrl1 <- trainControl(method = "cv", number = 10)
-
 # Split data into testing and training
 data_split <- initial_split(flu_df, prop = 0.8)
 training_data <- training(data_split)
 testing_data <- testing(data_split)
+
+# Set preprocessing
+preproc <- c("center", "scale", "zv")
+
+# Set up cross validation control - with 5 repeats
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 5,
+                     summaryFunction = defaultSummary,
+                     classProbs = TRUE)
 
 ```
 
@@ -90,7 +98,7 @@ The `severe_flu` dataset used for analysis contains demographic and clinical inf
 
 # 2. Exploratory Analysis
 
-Exploratory data analysis was undertaken to examine the structure of the `severe_flu` dataset, including assessment of data distributions, and relationships between variables. The dataset contains 1,000 observations with 12 variables after removing the ID column. Categorical variables (gender, race, smoking status, diabetes, hypertension, and severe flu outcome) were converted to factors with appropriate labels. The dataset was verified to be complete with no missing observations. Summary statistics were calculated for all demographic and clinical variables. Visualisations were produced to compare characteristics between participants who did and did not experience severe flu.
+Exploratory data analysis was undertaken to examine the structure of the `severe_flu` dataset, including assessment of data distributions, and relationships between variables. The dataset contains 1,000 observations with 12 variables after removing the ID column. Categorical variables (gender, race, smoking status, diabetes, hypertension, and severe flu outcome) were converted to factors with appropriate labels. The dataset was verified to be complete with no missing observations. Summary statistics were calculated for all demographic and clinical variables. Visualisations were produced to compare characteristics.
 
 ## 2.1. Summary Statistics
 
@@ -252,7 +260,6 @@ Among categorical predictors, there appears to be differences in severe flu rate
 
 ## 2.3. Correlation Analysis
 
-
 ```{r}
 
 # Set seed for reproducibility
@@ -274,20 +281,241 @@ The correlation plot shows several relationships among continuous predictors. We
 
 ## 3.1. Data preprocessing
 
-The data was examined to identify missing values and undertake data cleaning. No missing observations were identified. Categorical variables were converted into appropriate factor variables: gender (Female/Male), race/ethnicity (White, Asian, Black, Hispanic), smoking status (Never, Former, Current), diabetes (No/Yes), hypertension (No/Yes), and the response variable severe flu (No/Yes). The ID variable was removed as it was not a meaningful predictor for flu severity. The preprocessed dataset was then split into training (80%) and testing (20%) sets for model development and evaluation.
+The data was examined to identify missing values and undertake data cleaning. No missing observations were identified. Categorical variables were converted into appropriate factor variables: gender (Female/Male), race/ethnicity (White, Asian, Black, Hispanic), smoking status (Never, Former, Current), diabetes (No/Yes), hypertension (No/Yes), and the response variable severe flu (No/Yes). ID was removed as it was not a meaningful predictor for flu severity. The dataset was then split into training (80%) and testing (20%) sets for model development and evaluation. All models except MARS and GAM were trained using centered and scaled data to ensure preprocessing was applied to models sensitive to feature scale.
 
-## 3.2. Model Evaluation metrics
+## 3.2. Model Evaluation Approach
 
-Area Under the Receiver Operating Characteristic curve (AUC) was selected as the metric for evaluating classification performance across all candidate models. AUC measures a model's ability to discriminate between severe and non-severe flu cases across all possible classification thresholds, with values ranging from 0.5 (no better than random chance) to 1.0 (perfect discrimination) (Hosmer et al., 2013). AUC was computed during cross-validation (10-fold with 5 repeats) on the training dataset to select optimal model parameters. Final model performance was then evaluated on the held-out test dataset. This approach allowed for fair comparison between simple models (logistic regression, LDA) and more complex techniques (SVM, boosting) while being robust to class imbalance in the dataset (Kuhn & Johnson, 2013). Confusion matrices were generated for the final selected model to report classification accuracy, sensitivity, and specificity at the 0.5 probability threshold, following the Bayes decision rule, which assigns an observation to the most likely class. This was undertaken to assess predictive performance after model selection based on cross-validated AUC.
+Kappa and classification accuracy were selected as the metrics for evaluating classification performance across all candidate models, with larger values representing better performance. Accuracy measures the overall proportion of correct classifications, while Kappa represents agreement between predicted and actual class labels occurring by chance. Kappa values range from 0 (no agreement beyond chance) to 1 (perfect agreement) (McHugh, 2012). These metrics were computed during cross-validation (10 fold with 5 repeats using the R `caret` package) on the training dataset for selecting optimal parameters. Final model performance was then evaluated on the held-out test dataset. This approach allowed for fair comparison between simple models (logistic regression, LDA) and more complex techniques (SVM, boosting) (Kuhn & Johnson, 2013). Confusion matrices were generated from the test dataset evaluation for the final selected model to report classification accuracy, sensitivity, and specificity at the 0.3 probability threshold. This threshold was selected in line with guidance from Saito and Rehmsmeier (2015), who note that threshold selection make careful consideration of imbalanced classification. The adjustment was chosen to prioritise sensitivity by reducing the likelihood of false negatives, which is relevant for our study.
 
 ## 3.3. Models
 
+Eight predictive models for severe flu were evaluated: logistic regression, penalized logistic regression (elastic net), linear discriminant analysis (LDA), multivariate adaptive regression splines (MARS), generalized additive model (GAM), linear support vector machine (SVM), radial kernel SVM, and boosting (AdaBoost).
+
+### 3.3.1 Simpler Models
+
+#### Logistic Regression
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Train logistic regression model with CV
+model.glm <- train(severe_flu ~ ., 
+                   data = training_data,
+                   method = "glm",
+                   preProcess = preproc,
+                   trControl = ctrl)
+
+```
+
+#### Penalized Logistic Regression
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+
+# Define tuning grid for penalized logistic regression
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 21),
+                        .lambda = exp(seq(-8, 0, length = 50)))
+
+# Fit model with CV
+model.glmn <- train(severe_flu ~ .,
+                    data = training_data,
+                    preProcess = preproc,
+                    method = "glmnet",
+                    tuneGrid = glmnGrid,
+                    trControl = ctrl)
+
+# Show best tuning parameters
+model.glmn$bestTune
+
+# Plot the results
+myCol <- rainbow(25)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+plot(model.glmn, par.settings = myPar, xTrans = function(x) log(x))
+
+
+# Coefficients in the final model
+coef(model.glmn$finalModel, model.glmn$bestTune$lambda)
+
+```
+
+#### LDA
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+
+# Fit the LDA model using MASS package
+lda.fit <- lda(severe_flu ~ ., data = training_data)
+
+# Plot the histogram of discriminant scores (Z-variable, Z = a^T*X)
+plot(lda.fit)
+
+# Fit LDA model using caret
+model.lda <- train(severe_flu ~ .,
+                   data = training_data,
+                   preProcess = preproc,
+                   method = "lda",
+                   trControl = ctrl)
+
+```
+
+### 3.3.2 Moderately Complex Models
+
+#### MARS
+
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Tuning grid for degree and number of terms (nprune)
+mars_grid <- expand.grid(
+  degree = 1:4, # degree of interactions
+  nprune = 2:20 # no. of retained terms
+)
+
+# Fit the MARS model
+model.mars <- train(severe_flu ~ .,
+                    data = training_data,
+                    method = "earth",
+                    tuneGrid = mars_grid,
+                    trControl = ctrl)
+
+# Plot CV results
+ggplot(model.mars)
+
+# Best parameters
+model.mars$bestTune
+
+# Coefficients for final model
+coef(model.mars$finalModel)
+
+# Partial dependence plot for 'bmi'
+pdp::partial(model.mars, pred.var = c("bmi"), grid.resolution = 200) |> autoplot()
+
+# Partial dependence plot for 'LDL'
+pdp::partial(model.mars, pred.var = c("LDL"), grid.resolution = 200) |> autoplot()
+
+
+```
+
+The MARS model can be represented as follows:
+
+$$
+\begin{aligned} 
+\log(\text{odds of severe flu})= -2.26535278 + 0.35193909 × h(bmi-26.6) + 0.01153187 × h(LDL-77)
+\end{aligned}
+$$
+
+where $h(x) = \max(0,x)$ is the hinge function.
+
+
+```{r}
+
+# Variable importance plot for MARS
+vip(model.mars$finalModel, type = "nsubsets")
+
+```
+
+#### GAM
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Fit GAM model using caret
+model.gam <- train(
+  severe_flu ~ .,
+  data = training_data,
+  method = "gam",
+  trControl = ctrl
+)
+
+# Summary
+summary(model.gam)
+
+# Examine final model parameters
+model.gam$finalModel
+
+# Plot smooth GAM terms
+# Code source: https://bookdown.org/ndphillips/YaRrr/arranging-plots-with-parmfrow-and-layout.html
+par(mfrow = c(3, 2))  
+plot(model.gam$finalModel)
+par(mfrow = c(1, 1)) # Reset plotting window
+
+```
+
+### 3.3.3 Complex Models
+
+#### Support Vector Machine Linear
+
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Fit model using SVM (linear)
+svml.fit <- train(severe_flu ~ . ,
+                  data = training_data,
+                  preProcess = preproc,
+                  method = "svmLinear",
+                  tuneGrid = data.frame(C = exp(seq(-6, 2, len = 50))),
+                  trControl = ctrl)
+
+# Plot
+plot(svml.fit, highlight = TRUE, xTrans = log)
+
+# Find optimal
+svml.fit$bestTune # optimal C = 0.004762708
+
+```
+
+#### Support Vector Machine Radial Kernel
+
+
+```{r}
+
+# Set seed for reproducibility
+set.seed(299)
+
+# Define tuning grid for Radial Kernel
+svmr.grid <- expand.grid(C = exp(seq(-1, 5, len = 10)),
+                         sigma = exp(seq(-12, -2, len = 10)))
+
+# Fit radial kernel model
+svmr.fit <- train(severe_flu ~ . , 
+                  data = training_data,
+                  method = "svmRadialSigma",
+                  preProcess = preproc,
+                  tuneGrid = svmr.grid,
+                  trControl = ctrl)
+
+# Best sigma and cost
+svmr.fit$bestTune # sigma = 0.00482795
+
+# Plot
+plot(svmr.fit, highlight = TRUE, xTrans = log)
+
+```
+
+#### Boosting
 
 # 4. Results
 
 ## 4.1. Model Comparison and Selection
 
-Eight predictive models for severe flu were evaluated: logistic regression, penalized logistic regression (elastic net), linear discriminant analysis (LDA), multivariate adaptive regression splines (MARS), generalized additive model (GAM), linear support vector machine (SVM), radial kernel SVM, and adaptive boosting (AdaBoost). Repeated 10-fold cross-validation (with 5 repeats) was implemented to objectively compare performance across the models, using AUC as the primary evaluation metric. This cross-validation approach allowed for robust comparison while minimizing the risk of overfitting. Models were then assessed on the held-out test set (20% of the original data) to validate performance and ensure the selected model would generalise appropriately to new observations from the same population.
+Repeated 10-fold cross-validation (with 5 repeats) was implemented to objectively compare performance across the models, using Kappa as the primary evaluation metric, with Accuracy as a secondary evaluation metric. This cross-validation approach allowed for robust comparison while minimising the risk of overfitting. The final model was then assessed on the held-out test set (20% of the original data) to validate performance on unseen data.
 
 ```{r}
 
@@ -303,65 +531,39 @@ res <- resamples(list(Logistic_Regression = model.glm,
                       SVM_Linear = svml.fit,
                       SVM_Radial_Kernel = svmr.fit,
                       AdaBoost = gbmA.fit))
-summary(res)
 
-bwplot(res, metric="ROC")
+bwplot(res)
 
 ```
-**Figure. Boxplot of cross-validated AUC (ROC) values for all candidate models. SVM with a radial kernel achieved the highest average AUC and showed consistent performance across resamples, while other models such as penalized logistic regression and logistic regression also performed comparably well.**
+
+**Figure. Boxplot of cross-validated Accuracy and Kappa values for all candidate models.**
 
 ```{r}
-
 # Set seed for reproducibility
 set.seed(299)
 
-# Extract mean AUC values 
-roc_df <- as_tibble(summary(res)$statistics$ROC, rownames = "Model")
+# Get mean Accuracy and Kappa from resamples
+res_summary <- summary(res)
 
-# Select only Model and AUC
-roc_clean <- roc_df %>%
-  transmute(Model, AUC = round(Mean, 3))
+# Get Accuracy and Kappa means
+acc <- res_summary$statistics$Accuracy[, "Mean"]
+kap <- res_summary$statistics$Kappa[, "Mean"]
 
-# Display table
-kable(roc_clean)
-
-```
-**Table 2. Mean cross-validated AUC (ROC) values for all candidate models. SVM with a radial kernel achieved the highest average AUC (0.701).**
-
-The cross-validation results show that the SVM with a radial kernel achieved the highest mean AUC (0.701). Penalized logistic regression (AUC = 0.696) and standard logistic regression (AUC = 0.695) had a similar performance.
-
-## 4.2. Best performing model evaluation
-
-Based on cross-validation results, the SVM with radial kernel (SVM-radial) was selected as the best performing model, achieving the highest mean AUC (0.701) when implemented. The model was evaluated on the held-out test set to assess its generalizability to new data.
-
-```{r}
-
-# Set seed for reproducibility
-set.seed(299)
-
-# Predict probabilities on test data using radial SVM
-svm.radial.pred <- predict(svmr.fit, newdata = testing_data, type = "prob")[, "Yes"]
-
-# Convert to class predictions using 0.5 cutoff
-svm.radial.class <- ifelse(svm.radial.pred > 0.5, "Yes", "No")
-
-# Confusion Matrix
-confusionMatrix(factor(svm.radial.class, levels = c("No", "Yes")),
-                testing_data$severe_flu,
-                positive = "Yes")
-
-# ROC and AUC
-roc.svm.radial <- roc(testing_data$severe_flu, svm.radial.pred)
-plot(roc.svm.radial, legacy.axes = TRUE, print.auc = TRUE)
+# Table
+kable(data.frame(
+  Accuracy = round(acc, 4),
+  Kappa = round(kap, 4)
+))
 
 ```
-**Figure 5. ROC curve for the SVM-radial model on the test dataset, showing an AUC of 0.699**
 
-The SVM radial kernel model achieved an AUC of 0.699 when fitted on the test dataset, indicating moderate discriminative ability between severe and non-severe flu cases. This suggests the model generalises well to unseen data without overfitting. Based on predictions on the test dataset, the accuracy of the radial kernel SVM model is **0.745**, or 74.5%. The misclassification rate is **0.255**, meaning 25.5% of test observations were incorrectly classified. The **P-Value [Acc > NIR] is 0.1554**, indicating that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71). This would indicate that the model does not outperform a naive classifier that always predicts the majority class, non-severe flu. Based on test data predictions, the model gave 139 true negatives (non-severe flu cases correctly classified as “No”) and 10 true positives (severe flu cases correctly classified as “Yes”). There were 48 false negatives (severe flu cases misclassified as “No”) and 3 false positives (non-severe cases misclassified as “Yes”). The model showed high specificity (97.89%), accurately identifying individuals who would not develop severe flu. However, its sensitivity was comparatively low (17.24%), indicating limited ability to correctly identify those who would develop severe flu. The Kappa statistic is **0.1963**, representing weak agreement between predicted and actual class labels, only slightly better than chance. These results suggest that while advanced modelling approaches like SVM offer some improvement in predictive performance, the gain may not be practically significant when compared to simpler approaches like logistic regression.
+**Table 1. Cross-validated Accuracy and Kappa values (mean) for candidate models.**
 
-## 4.3. Preferred Model for Clinical Use: Logistic Regression
+Table 1 shows that the SVM radial kernel model had the highest mean accuracy (0.7755), however logistic regression had a very similar performance (0.7750). LDA (0.2214) and GAM (0.2200) had the highest Kappa values. Logistic regression also had a similar Kappa value (0.2152). By comparison, both SVM models had comparably lower Kappa values. Kappa was emphasised as the primary evaluation metric, given the class imbalance identified in the data and its ability to adjust for agreement due to chance. Therefore, given its strong performance across both metrics, logistic regression was selected as the final model.
 
-While SVM radial kernel was slightly better performing compared to logistic regression, as a black-box model, it lacks interpretability in the context of the study, particularly as it does not provide direct risk probabilities. In comparison, logistic regression was comparable in predictive performance (AUC = 0.695), with a sensitivity of 0.1897 and specificity of 0.9577. It also has the advantage of offering interpretation through coefficients and predicted probabilities. Therefore, while the SVM radial kernel model may be slightly better for prediction accuracy, logistic regression is preferred in this clinical context involving risk assessment for individual subjects, consistent with the modelling tradeoffs emphasised in data science practice. As an important consideration, scholars including Kerr et al. (2014) caution that very small improvements in discrimination metrics such as AUC may lack clinical meaning and may not justify the added complexity of new models, especially when they do not translate into improvements in patient outcomes or clinical decision-making. This is further supported by a systematic review of 71 clinical prediction studies which found no performance advantage of complex machine learning methods over traditional logistic regression for clinical use (Christodoulou et al., 2019).
+## 4.2. Preferred Model for Clinical Use: Logistic Regression
+
+Although SVM radial kernel was slightly better performing in terms of accuracy compared to logistic regression, as a black-box model, it lacks interpretability in the context of the study, particularly as it does not provide direct risk probabilities. In comparison, logistic regression had a comparable accuracy and one of the highest Kappa values. Importantly, it also has the advantage of offering clear interpretation through coefficients and predicted probabilities compared to other models, including black box SVM models. Therefore, logistic regression is preferrable in this context for the development of clinically relevant and interpretable risk scores. As an important consideration, scholars including Kerr et al. (2014) caution that very small improvements in discrimination metrics may lack clinical meaning and may not justify the added complexity of new models, especially when they do not translate into improvements in patient outcomes or clinical decision-making. This is further supported by a systematic review of 71 clinical prediction studies which found no performance advantage of complex machine learning methods over traditional logistic regression for clinical use (Christodoulou et al., 2019).
 
 ```{r}
 
@@ -373,9 +575,9 @@ glm.pred <- predict(model.glm,
                     newdata = testing_data, 
                     type = "prob")[, "Yes"]
 
-# Convert probabilities to class predictions, using 0.5 cutoff
+# Convert probabilities to class predictions, using 0.3 cutoff
 glm.class <- rep("No", length(glm.pred))
-glm.class[glm.pred > 0.5] <- "Yes"
+glm.class[glm.pred > 0.3] <- "Yes"
 
 # Confusion matrix
 confusionMatrix(
@@ -389,7 +591,7 @@ roc.glm <- roc(testing_data$severe_flu, glm.pred)
 
 ```
 
-Based on predictions on the test dataset, the accuracy of the logistic regression model is **0.735**, or 73.5%. The misclassification rate is **0.265**, meaning about 26.5% of test observations were incorrectly classified. The P-Value [Acc > NIR] is **0.2434**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class. The model predictions indicate 136 true negatives (non-severe flu cases correctly classified as “No”), and 11 true positives (severe flu cases correctly classified as “Yes”). The model gave 6 false positives (non-severe flu cases misclassified as “Yes”) and 47 false negatives (severe flu cases misclassified as “No”). Sensitivity was **0.1897**, which shows that the model correctly identified only 18.97% of severe flu cases. By comparison, specificity was **0.9577**, indicating that 95.77% of non-severe cases were correctly classified. The Kappa statistic was **0.1864**, indicating poor agreement between predicted and actual class labels, beyond what would be expected by chance. 
+A 0.3 probability threshold was used to assign predicted classes in evaluation of the model based on test data. The accuracy of the logistic regression model is **0.695**, or 69.5%. The misclassification rate is **0.305**, meaning about 30.5% of test observations were incorrectly classified. The P-Value [Acc > NIR] is **0.7098**, which indicates that the model’s accuracy is not significantly better than the no information rate (NIR = 0.71), representing the accuracy that would be achieved by always predicting the most frequent class. Therefore, this model does not outperform a naive classifier that always predicts the majority class. The model predictions indicate 112 true negatives (non-severe flu cases correctly classified as “No”), and 27 true positives (severe flu cases correctly classified as “Yes”). The model gave 30 false positives (non-severe flu cases misclassified as “Yes”) and 31 false negatives (severe flu cases misclassified as “No”). Sensitivity was **0.4655**, which shows that the model correctly identified 46.55% of severe flu cases. By comparison, specificity was **0.7887**, indicating that 78.87% of non-severe cases were correctly classified. The Kappa statistic was **0.2556**, indicating fair agreement between predicted and actual class labels, beyond what would be expected by chance. 
 
 ```{r}
 
@@ -401,9 +603,9 @@ plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
 plot(smooth(roc.glm), col = 4, add = TRUE)
 
 ```
-**Figure 6. ROC curve for the logistic regression model on the test dataset, showing an AUC of 0.703**
+**Figure 6. ROC curve for the logistic regression model based on the test dataset, with an AUC of 0.703**
 
-The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds, although it is not extremely high performing.
+The ROC curve indicates the model has moderate classification performance, with an **AUC of 0.703**. This means that the model achieves a reasonable tradeoff between sensitivity and specificity across different classification thresholds.
 
 ## 4.4. Predictive Risk Score
 
@@ -433,23 +635,22 @@ ggplot(risk_df, aes(x = risk_score, fill = severe_flu)) +
 
 ```
 
-**Figure 6. Distribution of severe flu risk scores by actual severe flu outcome. The histogram shows the distribution of predicted probabilities from the logistic regression model by outcome (blue = no severe flu, pink = severe flu).**
+**Figure 7. Distribution of severe flu risk scores by actual severe flu outcome. The histogram shows the distribution of predicted probabilities from the logistic regression model by outcome (blue = no severe flu, pink = severe flu).**
 
-From the histogram plot, it is observed that there is substantial overlap between subjects who experienced severe flu and those who did not. Although patients who developed severe flu tend to be higher in the upper ranges of predicted probabilities (above 0.4) and slightly lower representation in the lowest risk range (0.1-0.2), many still received relatively low risk scores. The overlap in distributions for both severe and non-severe flu groups suggests the model performs relatively well in assigning higher risk to true cases, but it does not reliably distinguish the two groups. This likely reflects the model's modest discriminative ability as well as the class imbalance in the dataset.
-
-The predicted risk of experiencing severe flu can be quantified using the fitted logistic regression model, which estimates the log-odds of severe flu as a linear combination of demographic and clinical predictors. The model equation is:
+From the histogram plot, it is observed that there is substantial overlap between subjects who experienced severe flu and those who did not. Although patients who developed severe flu tend to be higher in the upper ranges of predicted probabilities (above 0.4) and slightly lower representation in the lowest risk range (0.1-0.2), many still received relatively low risk scores (under 0.3). The overlap in distributions for both severe and non-severe flu groups suggests the model performs relatively well in assigning higher risk to true cases, but it does not distinguish the two groups with near perfect reliability. This likely reflects the model's modest discriminative ability as well as the class imbalance in the dataset. The predicted risk of experiencing severe flu can be quantified using the fitted logistic regression model, which estimates the log-odds of severe flu as a linear combination of demographic and clinical predictors. The model equation is:
 
 $$
 \begin{aligned}
 \log(\text{odds of severe flu}) =\ 
-& -78.592 - 0.029 \cdot \text{age} + 0.310 \cdot \text{gender}_{\text{Male}} \\
-& +\ 0.323 \cdot \text{race}_{\text{Asian}} - 0.176 \cdot \text{race}_{\text{Black}} + 0.417 \cdot \text{race}_{\text{Hispanic}} \\
-& -\ 0.205 \cdot \text{smoking}_{\text{Former}} + 0.611 \cdot \text{smoking}_{\text{Current}} \\
-& +\ 0.424 \cdot \text{height} - 0.451 \cdot \text{weight} + 1.544 \cdot \text{BMI} \\
-& +\ 0.484 \cdot \text{diabetes}_{\text{Yes}} + 0.447 \cdot \text{hypertension}_{\text{Yes}} \\
-& -\ 0.0117 \cdot \text{SBP} + 0.0118 \cdot \text{LDL}
+& - 1.29276916 -0.12451889 \cdot \text{age} + 0.15509135 \cdot \text{gender}_{\text{Male}} \\
+& +\ 0.07968378 \cdot \text{race}_{\text{Asian}} - 0.06840200 \cdot \text{race}_{\text{Black}} + 0.12722560 \cdot \text{race}_{\text{Hispanic}} \\
+& -\ 0.09420215 \cdot \text{smoking}_{\text{Former}} + 0.18344992 \cdot \text{smoking}_{\text{Current}} \\
+& +\ 2.58962594 \cdot \text{height} - 3.23060603 \cdot \text{weight} + 4.24941691 \cdot \text{BMI} \\
+& +\ 0.17126025 \cdot \text{diabetes}_{\text{Yes}} + 0.22275667 \cdot \text{hypertension}_{\text{Yes}} \\
+& -\ 0.08938464 \cdot \text{SBP} + 0.22156244 \cdot \text{LDL}
 \end{aligned}
 $$
+
 Note that the predicted probability for severe flu based on individual participant characteristics can be calculated as:
 
 $$
@@ -478,10 +679,12 @@ kable(coef_table, digits = 3)
 ```
 **Table 3. Logistic Regression model coefficients and odds ratios for severe flu prediction**
 
+Table 3 shows the logistic regression model coefficients and odds ratios for severe flu prediction. BMI showed the strongest positive association with severe flu risk (OR = 70.065). This may potentially be due to multicollinearity with height and weight (OR = 13.325 and OR = 0.040, respectively), rather than a true independent effect. Therefore, these individual odds ratios should be interpreted with caution, though overall risk score validity remains strong. In terms of clinical relevance, this would suggest that body composition is associated with severe flu, though the specific contribution of each measure cannot be concluded. Several demographic factors, including being male (OR = 1.168) and Hispanic race (OR = 1.136) were associated with slightly higher odds of severe flu compared to females and White individuals respectively. Clinical factors including hypertension (OR = 1.250), diabetes (OR = 1.187), and LDL cholesterol (OR = 1.248) were also associated with an increase in odds of severe flu. Current smoking was associated with an approximate 20% higher odds of severe flu (OR = 1.201) compared to never smoking. However, each additional year of age was associated with approximately 12% lower odds of severe flu (OR = 0.883), which may reflect confounding or cohort effects warranting further inquiry.
+
 ```{r}
 
-# Create a coefficient plot for visualization
-coef_plot_data <- coef_df[-1, ] # Remove intercept for plotting
+# coefficient plot 
+coef_plot_data <- coef_df[-1, ] 
 coef_plot_data$Predictor <- factor(coef_plot_data$Predictor)
 coef_plot_data$Direction <- ifelse(coef_plot_data$Coefficient > 0, "Positive", "Negative")
 
@@ -497,13 +700,15 @@ ggplot(coef_plot_data, aes(x = reorder(Predictor, Coefficient), y = Coefficient,
 
 # 5. Limitations
 
-The main limitation of this study is the class imbalance, which most likely contributed to low sensitivity across models. Although SVM radial kernel performed well on AUC, they did not significantly outperform the no information rate when evaluated at a 0.5 threshold. Additionally, black-box models offer limited interpretability, which makes them less practical in clinical or decision-making contexts. 
+A significant limitation of this study is the class imbalance in the dataset, which most likely contributed to low sensitivity across models. It is important to note that while some models showed relatively high classification accuracy, their low Kappa values suggest that performance may be attributable to majority class prediction, rather than good agreement. Additionally, black-box models offer limited interpretability, which makes them less practical in this specific clinical context. 
 
 # 6. Conclusion
 
-
+In summary, although the SVM with radial kernel had the highest mean cross-validated accuracy, logistic regression demonstrated nearly identical performance, with stronger interpretability and higher Kappa. In fact, the kappa for both SVM models did not indicate substantial improvement in agreement beyond chance, which suggests practical limitations. Therefore, while advanced models may offer some minor improvements in predictive accuracy, they may not be justified in this clinical setting. Standard logistic regression is strongly recommended over more complex models. Evaluation of the final logistic regression model showed a test accuracy of 69.5%, with a misclassification rate of 30.5%. However, the model did not significantly outperform the no information rate (NIR = 0.71; p = 0.7098). Sensitivity was in the moderate range (46.55%), which indicates that further optimisation of the classification threshold may be necessary depending on clinical priorities. Future research should address the class imbalance identified in the dataset and optimise classification thresholds to improve model performance in detecting severe flu cases in the population of interest.
 
 # References
+
+McHugh, M. L. (2012). Interrater reliability: the kappa statistic. Biochemia medica, 22(3), 276-282.
 
 Christodoulou, E., Ma, J., Collins, G. S., Steyerberg, E. W., Verbakel, J. Y., & Van Calster, B. (2019). A systematic review shows no performance benefit of machine learning over logistic regression for clinical prediction models. Journal of clinical epidemiology, 110, 12-22.
 
